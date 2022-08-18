@@ -125,60 +125,6 @@ class SuperconceptDiscovery(object):
                 target_masks[img_id_name] = mask
         return target_masks
 
-    def extract_superpatch(self, img, image_mask, img_id):
-        img, x, preds = self.model.get_preds(img) # returns: i/p, i/p to n/w, preds
-        pre_class = preds.argmax()
-        print(pre_class)
-        self.model.gradCAM_model.showCAMs(img, img_id, x=x.cuda(), chosen_class=pre_class, keep_percent=3)
-        cam3, cam = self.model.gradCAM_model.compute_heatmap(x=x.cuda(), classIdx=pre_class, keep_percent=3)
-        mask = copy.deepcopy(image_mask)
-        mask_resized = np.array(Image.fromarray(mask).resize((sz,sz), Image.BILINEAR))
-        max_score = -1 * float('inf')
-        seg_id = None
-
-        if (img_id == "2008_008765.jpg"):
-            found = True
-
-        mask_selected = False
-        for j in range(1, mask_resized.max()+1):
-            m = copy.deepcopy(mask_resized)
-            m[m != j] = 0
-            m[m == j] = 1
-            if np.count_nonzero(m) <= m.size/100:
-                continue
-            # mask_img = np.stack([m, m, m], axis=2) * img
-            # Changed from cam (binary) to cam3 (score), use IOU
-            intersection = (m * cam3[:, :, 0]).sum(axis=(0, 1))
-            score = intersection / (np.count_nonzero(cam)+np.count_nonzero(cam[:,:,0])-intersection)
-            if score > max_score:
-                seg_id = j
-                max_score = score
-                # output_mask_img = mask_img.copy()
-                output_mask = m.copy()
-                mask_selected = True
-        if (not mask_selected):
-            return None, None
-        mask_expanded = np.expand_dims(output_mask, -1)
-        patch = (mask_expanded * img/255 + (1 - mask_expanded) * float(117) / 255)
-        ones = np.where(output_mask == 1)
-        h1, h2, w1, w2 = ones[0].min(), ones[0].max(), ones[1].min(), ones[1].max()
-        try:
-            image = Image.fromarray((patch[h1:h2, w1:w2]*255).astype(np.uint8))
-        except:
-            try:
-                image = Image.fromarray((patch[:, w1:w2] * 255).astype(np.uint8))
-            except:
-                try:
-                    image = Image.fromarray((patch[h1:h2, :] * 255).astype(np.uint8))
-                except:
-                    image = Image.fromarray((patch * 255).astype(np.uint8))
-        if not os.path.exists("./images/exp/"+self.target_class+"/sp/"):
-            os.makedirs("./images/exp/"+self.target_class+"/sp")
-        rp = image.resize((50,50),Image.BILINEAR)
-        rp.save("./images/exp/"+self.target_class+"/sp/"+img_id.replace(".jpg", '')+"_"+str(seg_id)+".png")
-        image_resized = np.array(image.resize((sz,sz), Image.BILINEAR)).astype(float)/255
-        return image_resized, patch
-
     # Use pixel level average distance to the center of gradcam
     def extract_superpatch_center(self, img, image_mask, img_id):
         img, x, preds = self.model.get_preds(img) # returns: i/p, i/p to n/w, preds
@@ -470,77 +416,6 @@ class SuperconceptDiscovery(object):
             mse_dic[j] = [mse, center-seg_act]
         return cos_dic, mse_dic
 
-    def get_all_cos_binary(self, masks, center, img):
-        cos_dic = {}
-        mse_dic = {}
-        for j in range(len(masks)):
-            m = copy.deepcopy(masks[j])
-            mask_resized = np.array(Image.fromarray(m).resize((sz,sz), Image.BILINEAR))
-            mask_expanded = np.expand_dims(mask_resized, -1)
-            mask_img = (mask_expanded * img/255 + (1 - mask_expanded) * float(117) / 255)
-                #mask_img = np.stack([m, m, m], axis=2) * img
-            seg_act = np.mean(mymodel.run_examples(mask_img, 'layer4.2.conv3'), (1,2)).squeeze(0)
-            mse = np.sum((center-seg_act)**2)
-            cos = spatial.distance.cosine(center, seg_act)
-            cos_dic[j] = [cos, center-seg_act]
-            mse_dic[j] = [mse, center-seg_act]
-        return cos_dic, mse_dic
-
-    def generate_dataset(self, ):
-        """ for each image, find the closest acts to each class center, save the difference """
-        print(self.target_class, 'start to generate dataset')
-        means = {}
-        for target_class, class_id in self.discover_class_dict.items():
-            means[target_class] = torch.load(os.path.join(self.save_dir, target_class, '/mean.pth'))
-
-        target_masks = concept.load_concept_masks(self.target_class, self.mask_dir, self.test_img_dir)
-        result = {}
-        for img_id, image_mask in tqdm(target_masks.items()):
-            img_dic = {}
-            img = np.array(Image.open(img_dir + self.discover_class_dict[self.target_class] + '/' + img_id).resize((299,299), Image.BILINEAR))
-            mask_resized = np.array(Image.fromarray(image_mask).resize((sz,sz), Image.BILINEAR))
-            if img.shape != (sz,sz,3):
-                print('wrong shape')
-                continue
-            for k, mean in means.items():
-                cos_dic, mse_dic = self.get_all_cos(mask_resized, mean, img)
-                cos_dic = {k: v for k, v in sorted(cos_dic.items(), key=lambda item: item[1][0])}
-                target_index = list(cos_dic.keys())[0]
-                cos_sim = cos_dic[target_index][0]
-                target_act = cos_dic[target_index][1]
-                img_dic[k] = (cos_sim, target_act)
-            result[img_id] = img_dic
-        class_save_dir = os.path.join(self.save_dir, self.target_class)
-        torch.save(result, os.path.join(class_save_dir, '/diff_acts.pth'))
-        print(self.target_class, 'finished!')
-
-    def generate_dataset_binary(self, ):
-        """ for each image, find the closest acts to each class center, save the difference """
-        print(self.target_class, 'start to generate dataset')
-        means = {}
-        for target_class, class_id in self.discover_class_dict.items():
-            means[target_class] = torch.load(os.path.join(self.save_dir, target_class, "mean.pth"))
-
-        target_masks = concept.load_concept_masks(self.target_class, self.mask_dir, self.test_img_dir)
-        result = {}
-        for img_id, image_mask in tqdm(target_masks.items()):
-            img_dic = {}
-            img = np.array(Image.open(img_dir + self.discover_class_dict[self.target_class] + '/' + img_id).resize((299,299), Image.BILINEAR))
-            #mask_resized = np.array(Image.fromarray(image_mask).resize((sz,sz), Image.BILINEAR))
-            if img.shape != (sz,sz,3):
-                print('wrong shape')
-                continue
-            for cls, mean in means.items():
-                cos_dic, mse_dic = self.get_all_cos_binary(image_mask, mean, img)
-                cos_dic = {k: v for k, v in sorted(cos_dic.items(), key=lambda item: item[1][0])}
-                target_index = list(cos_dic.keys())[0]
-                target_act = cos_dic[target_index][1]
-                img_dic[cls] = target_act
-            result[img_id] = img_dic
-        class_save_dir = os.path.join(self.save_dir, self.target_class)
-        torch.save(result, os.path.join(class_save_dir, 'val_acts.pth'))
-        print(self.target_class, 'finished!')
-
 def M_step(iter, target_class, res, discover_class_dict, extraction_dir, save_dir):
     vidx= {target_class:[]}
     seg = []
@@ -701,8 +576,6 @@ if __name__=='__main__':
     # for img_id, image_mask in tqdm(concept.target_masks.items()):
     #     if img_id not in discovered_images:
     #         pass
-
-
 
     # EM
     target_masks = concept.load_concept_masks(target_class, mask_dir, extraction_dir)  # load masks
