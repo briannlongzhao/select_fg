@@ -1,32 +1,33 @@
 import json
 import os
 import numpy as np
-from multiprocessing import dummy as multiprocessing
+import argparse
+#from multiprocessing import dummy as multiprocessing
 import sys
 #sys.path.append('/lab/tmpig23/u/yao_code/Human-AI-Interface/')
-# from matplotlib import pyplot as plt
-# import matplotlib.gridspec as gridspec
-# import tsnecuda
-import tcav.model as model
+# # from matplotlib import pyplot as plt
+# # import matplotlib.gridspec as gridspec
+# # import tsnecuda
+# #import tcav.model as model
 from PIL import Image
-from skimage.segmentation import mark_boundaries
-from sklearn import linear_model
+# #from skimage.segmentation import mark_boundaries
+# #from sklearn import linear_model
 from tqdm import tqdm
-from torchvision import transforms
-from sklearn.model_selection import cross_val_score
-import tensorflow as tf
+# #from torchvision import transforms
+# #from sklearn.model_selection import cross_val_score
+# #import tensorflow as tf
 import cv2
 import heapq
-from model_Pytorch import *
-from select_mask import *
-from gradcam_pytorch import GradCAM_model
+# from model_Pytorch import *
+# from select_mask import *
+# from gradcam_pytorch import GradCAM_model
 import copy
 import timm
 import ace_helpers
-from scipy import spatial
-import scipy.optimize as opt
+# from scipy import spatial
+# import scipy.optimize as opt
 import math
-import heapq
+# import heapq
 import warnings
 warnings.filterwarnings("ignore")
 
@@ -268,8 +269,8 @@ class SuperconceptDiscovery(object):
         return image_resized, patch, output_mask_original
 
     def select_kcloser_to_mean(self, mean_idx, pick=200):
-        mean_path = self.save_dir + self.target_class + '/mean_dir/'
-        center = torch.load(mean_path + 'mean_'+str(mean_idx)+'.pth')
+        mean_path = os.path.join(self.save_dir, self.target_class, "mean_dir")
+        center = torch.load(ps.path.join(mean_path,'mean_'+str(mean_idx)+'.pth'))
         # print(f"center is {center[:5]}")
         dist_dic = {}
         target_masks = self.load_concept_masks(self.target_class, self.mask_dir, self.extraction_dir)
@@ -303,8 +304,8 @@ class SuperconceptDiscovery(object):
         self.valid_indexes = {self.target_class:[]}
         target_masks = self.load_concept_masks(self.target_class, self.mask_dir, self.extraction_dir)
         target_class_idx = int(''.join(c for c in discover_class_dict[self.target_class] if c.isdigit()))
-        result_path = concept.save_dir + concept.target_class + '/'
-        mask_path = concept.save_dir + concept.target_class+"_mask/"
+        result_path = os.path.join(concept.save_dir, concept.target_class)
+        mask_path = os.path.join(concept.save_dir,concept.target_class+"_mask")
         os.makedirs(result_path, exist_ok=True)
         os.makedirs(mask_path, exist_ok=True)
         print("target_mask len: "+str(len(target_masks)))
@@ -337,7 +338,7 @@ class SuperconceptDiscovery(object):
         class_save_dir = os.path.join(self.save_dir, self.target_class)
         if not os.path.exists(class_save_dir):
             os.makedirs(class_save_dir)
-        # torch.save(self.super_concept_images, class_save_dir + '/' + '500.pth')
+        # torch.save(self.super_concept_images, os.path.join(class_save_dir, '500.pth'))
 
         # debug
         '''Image.fromarray(patch).save(img_id)
@@ -357,7 +358,7 @@ class SuperconceptDiscovery(object):
 
     def compute_mean(self, valid_indexes, mean_save_idx, in_image_path=None):
         '''computes mean for patch in layer4.2.conv3 feature space for valid indices'''
-        self.super_concept_images = torch.load(self.save_dir + self.target_class +'/' + '500.pth')
+        self.super_concept_images = torch.load(os.path.join(self.save_dir,self.target_class, "500.pth"))
         valid_index = set()
         for index in valid_indexes[self.target_class]:
             if not isinstance(index, int) and isinstance(index, range):
@@ -387,9 +388,9 @@ class SuperconceptDiscovery(object):
         # print(f"concept mean: {concept_mean[:5]}")
         class_save_dir = os.path.join(self.save_dir, self.target_class)
         if not os.path.exists(class_save_dir + '/mean_dir'):
-            os.makedirs(class_save_dir+'/mean_dir')
+            os.makedirs(os.path.join(class_save_dir, "mean_dir"))
 
-        torch.save(concept_mean, class_save_dir + '/mean_dir/' + 'mean_'+str(mean_save_idx)+'.pth')
+        torch.save(concept_mean, os.path.join(class_save_dir, "mean_dir", "mean_"+str(mean_save_idx)+'.pth'))
 
     def get_all_cos(self, mask_resized, center, img, img_id=None):
         cos_dic = {}
@@ -494,7 +495,7 @@ class SuperconceptDiscovery(object):
         print(self.target_class, 'start to generate dataset')
         means = {}
         for target_class, class_id in self.discover_class_dict.items():
-            means[target_class] = torch.load(self.save_dir + target_class + '/mean.pth')
+            means[target_class] = torch.load(os.path.join(self.save_dir, target_class, "mean.pth"))
 
         target_masks = concept.load_concept_masks(self.target_class, self.mask_dir, self.test_img_dir)
         result = {}

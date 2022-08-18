@@ -1,0 +1,10 @@
+torch==1.10.1
+numpy==1.19.5
+matplotlib==3.3.1
+pillow==8.2.0
+tqdm
+opencv-python==4.5.1.48
+timm==0.5.4
+adversarial-robustness-toolbox==1.7.0
+tensorflow==1.14.0
+protobuf==3.13.0
