@@ -2,7 +2,6 @@ import json
 import os
 import numpy as np
 import argparse
-#from multiprocessing import dummy as multiprocessing
 import sys
 #sys.path.append('/lab/tmpig23/u/yao_code/Human-AI-Interface/')
 # # from matplotlib import pyplot as plt
@@ -24,35 +23,53 @@ import heapq
 import copy
 import timm
 import ace_helpers
-# from scipy import spatial
+from scipy import spatial
 # import scipy.optimize as opt
 import math
-# import heapq
 import warnings
 warnings.filterwarnings("ignore")
 
-discover_class_dict = {
-    'aeroplane': '0_aeroplane',
-    'bicycle': '1_bicycle',
-    'bird': '2_bird',
-    'boat': '3_boat',
-    'bottle': '4_bottle',
-    'bus': '5_bus',
-    'car': '6_car',
-    'cat': '7_cat',
-    'chair': '8_chair',
-    'cow': '9_cow',
-    'diningtable': '10_diningtable',
-    'dog': '11_dog',
-    'horse': '12_horse',
-    'motorbike': '13_motorbike',
-    'person': '14_person',
-    'pottedplant': '15_pottedplant',
-    'sheep': '16_sheep',
-    'sofa': '17_sofa',
-    'train': '18_train',
-    'tvmonitor': '19_tvmonitor'
-} #modify as per the dataset
+dataset = "voc"
+
+if dataset == "voc":
+    sz = 299
+    discover_class_dict = {
+        'aeroplane': '0_aeroplane',
+        'bicycle': '1_bicycle',
+        'bird': '2_bird',
+        'boat': '3_boat',
+        'bottle': '4_bottle',
+        'bus': '5_bus',
+        'car': '6_car',
+        'cat': '7_cat',
+        'chair': '8_chair',
+        'cow': '9_cow',
+        'diningtable': '10_diningtable',
+        'dog': '11_dog',
+        'horse': '12_horse',
+        'motorbike': '13_motorbike',
+        'person': '14_person',
+        'pottedplant': '15_pottedplant',
+        'sheep': '16_sheep',
+        'sofa': '17_sofa',
+        'train': '18_train',
+        'tvmonitor': '19_tvmonitor'
+    } #modify as per the dataset
+elif dataset == "coco":
+    sz = 375
+    with open("/lab/tmpig8e/u/brian-data/COCO2017/VOC_COCO2017/label2id.json") as f:  # label91
+        label2id = json.load(f)
+    with open("/lab/tmpig8e/u/brian-data/COCO2017/VOC_COCO2017/label80.txt") as f:  # label91
+        i = 0
+        for line in f.readlines():
+            label2id[line.replace('\n', '')] = i
+            i += 1
+
+    discover_class_dict = {}
+    for item in label2id.keys():
+        discover_class_dict[item] = item
+else:
+    raise NotImplementedError
 
 class SuperconceptDiscovery(object):
 
@@ -110,11 +127,12 @@ class SuperconceptDiscovery(object):
 
     def extract_superpatch(self, img, image_mask, img_id):
         img, x, preds = self.model.get_preds(img) # returns: i/p, i/p to n/w, preds
-        pre_class = preds[0].argmax()
+        pre_class = preds.argmax()
+        print(pre_class)
         self.model.gradCAM_model.showCAMs(img, img_id, x=x.cuda(), chosen_class=pre_class, keep_percent=3)
         cam3, cam = self.model.gradCAM_model.compute_heatmap(x=x.cuda(), classIdx=pre_class, keep_percent=3)
         mask = copy.deepcopy(image_mask)
-        mask_resized = np.array(Image.fromarray(mask).resize((299,299), Image.BILINEAR))
+        mask_resized = np.array(Image.fromarray(mask).resize((sz,sz), Image.BILINEAR))
         max_score = -1 * float('inf')
         seg_id = None
 
@@ -158,7 +176,7 @@ class SuperconceptDiscovery(object):
             os.makedirs("./images/exp/"+self.target_class+"/sp")
         rp = image.resize((50,50),Image.BILINEAR)
         rp.save("./images/exp/"+self.target_class+"/sp/"+img_id.replace(".jpg", '')+"_"+str(seg_id)+".png")
-        image_resized = np.array(image.resize((299,299), Image.BILINEAR)).astype(float)/255
+        image_resized = np.array(image.resize((sz,sz), Image.BILINEAR)).astype(float)/255
         return image_resized, patch
 
     # Use pixel level average distance to the center of gradcam
@@ -167,9 +185,12 @@ class SuperconceptDiscovery(object):
         pre_class = preds[0].argmax()
         self.model.gradCAM_model.showCAMs(img, img_id, x=x.cuda(), chosen_class=pre_class, class_name=target_class, keep_percent=10)
         cam3, cam = self.model.gradCAM_model.compute_heatmap(x=x.cuda(), classIdx=pre_class, keep_percent=20)
-        target_class_idx = int(''.join(c for c in discover_class_dict[self.target_class] if c.isdigit()))
+        if dataset == "voc":
+            target_class_idx = int(''.join(c for c in discover_class_dict[self.target_class] if c.isdigit()))
+        elif dataset == "coco":
+            target_class_idx = label2id[self.target_class]
         mask = copy.deepcopy(image_mask)
-        mask_resized = np.array(Image.fromarray(mask).resize((299,299), Image.BILINEAR))
+        mask_resized = np.array(Image.fromarray(mask).resize((sz,sz), Image.BILINEAR))
         min_dist = float('inf')
         seg_id = None
         heap = []
@@ -178,8 +199,8 @@ class SuperconceptDiscovery(object):
             x = xy[0]
             y = xy[1]
             return np.exp(-((x - xo) * (x - xo) + (y - yo) * (y - yo)) / (2. * sigma * sigma)).ravel()
-        xvec = np.array(range(299))
-        yvec = np.array(range(299))
+        xvec = np.array(range(sz))
+        yvec = np.array(range(sz))
         X, Y = np.meshgrid(xvec, yvec)
         initial_guess = [150, 150, 50]  # x of center, y of center, variance
         try:
@@ -190,7 +211,7 @@ class SuperconceptDiscovery(object):
         #print(img_id, end=' ')
         #print("c1:", round(c1[0]), round(c1[1]), end=' ')
         #Find center using moment
-        c2 = self.model.gradCAM_model.find_gradcam_center(cam[:,:,0].astype('uint8'), 299)
+        c2 = self.model.gradCAM_model.find_gradcam_center(cam[:,:,0].astype('uint8'), sz)
         #print("c2:", round(c2[0]), round(c2[1]))
 
         if (img_id == "2010_000630.jpg"):
@@ -263,9 +284,9 @@ class SuperconceptDiscovery(object):
         #    os.makedirs(f"./images/exp/{self.target_class}/sp")
         #if not os.path.exists(save_dir+"gradcam_gaussian/"):
         #    os.makedirs(save_dir+"gradcam_gaussian/")
-        #rp = image.resize((299,299),Image.BILINEAR)
+        #rp = image.resize((sz,sz),Image.BILINEAR)
         #rp.save(save_dir+"gradcam_gaussian/"+img_id.replace(".jpg", '')+'_'+str(seg_id)+".png")
-        image_resized = np.array(image.resize((299,299), Image.BILINEAR)).astype(float)/255
+        image_resized = np.array(image.resize((sz,sz), Image.BILINEAR)).astype(float)/255
         return image_resized, patch, output_mask_original
 
     def select_kcloser_to_mean(self, mean_idx, pick=200):
@@ -276,10 +297,10 @@ class SuperconceptDiscovery(object):
         target_masks = self.load_concept_masks(self.target_class, self.mask_dir, self.extraction_dir)
         cos_similarities = []
         for img_id, image_mask in target_masks.items():
-            orig_img = np.array(Image.open(self.extraction_dir + self.discover_class_dict[self.target_class] + '/' + img_id).resize((299,299), Image.BILINEAR))
+            orig_img = np.array(Image.open(os.path.join(self.extraction_dir, self.discover_class_dict[self.target_class], img_id)).resize((sz,sz), Image.BILINEAR))
             mask = copy.deepcopy(image_mask)
             #need to change mask to use
-            mask_resized = np.array(Image.fromarray(mask).resize((299,299), Image.BILINEAR))
+            mask_resized = np.array(Image.fromarray(mask).resize((sz,sz), Image.BILINEAR))
             # print(f"mask resized: {mask_resized.shape}")
             # embedding, fg = self.get_embedding(img)
             cos_dic, mse_dic = self.get_all_cos(mask_resized, center, orig_img, img_id=img_id)
@@ -303,14 +324,17 @@ class SuperconceptDiscovery(object):
         self.super_concept_embed_dic = {}
         self.valid_indexes = {self.target_class:[]}
         target_masks = self.load_concept_masks(self.target_class, self.mask_dir, self.extraction_dir)
-        target_class_idx = int(''.join(c for c in discover_class_dict[self.target_class] if c.isdigit()))
+        if dataset == "voc":
+            target_class_idx = int(''.join(c for c in discover_class_dict[self.target_class] if c.isdigit()))
+        elif dataset == "coco":
+            target_class_idx = label2id[self.target_class]
         result_path = os.path.join(concept.save_dir, concept.target_class)
         mask_path = os.path.join(concept.save_dir,concept.target_class+"_mask")
         os.makedirs(result_path, exist_ok=True)
         os.makedirs(mask_path, exist_ok=True)
         print("target_mask len: "+str(len(target_masks)))
         #mymodel = timm.create_model('xception', pretrained=True)
-        #gradCAM_model = GradCAM_model(mymodel, 299, 'cuda:1', gradcam_layer='layer4.2.conv3')
+        #gradCAM_model = GradCAM_model(mymodel, sz, 'cuda:0', gradcam_layer='layer4.2.conv3')
         for img_id, image_mask in tqdm(target_masks.items()):
             img_original = np.array(Image.open(os.path.join(self.extraction_dir, self.discover_class_dict[self.target_class], img_id)))
             img = np.array(Image.open(os.path.join(self.extraction_dir, self.discover_class_dict[self.target_class], img_id)).resize((299,299), Image.BILINEAR))
@@ -358,7 +382,7 @@ class SuperconceptDiscovery(object):
 
     def compute_mean(self, valid_indexes, mean_save_idx, in_image_path=None):
         '''computes mean for patch in layer4.2.conv3 feature space for valid indices'''
-        self.super_concept_images = torch.load(os.path.join(self.save_dir,self.target_class, "500.pth"))
+        self.super_concept_images = torch.load(os.path.join(self.save_dir, self.target_class, "500.pth"))
         valid_index = set()
         for index in valid_indexes[self.target_class]:
             if not isinstance(index, int) and isinstance(index, range):
@@ -379,7 +403,7 @@ class SuperconceptDiscovery(object):
             for img_id in valid_indexes[self.target_class]:
                 if not os.path.exists(in_image_path+ '/' + img_id.replace("jpg", "png")):
                     continue
-                img = np.array(Image.open(in_image_path + '/' + img_id.replace("jpg", "png")).resize((299,299), Image.BILINEAR)).astype(float)/255
+                img = np.array(Image.open(os.path.join(in_image_path, img_id.replace("jpg", "png"))).resize((299,299), Image.BILINEAR)).astype(float)/255
                 activation = self.model.run_examples(img, 'layer4.2.conv3')
                 acts.append(np.mean(activation, (1,2)))
 
@@ -407,7 +431,7 @@ class SuperconceptDiscovery(object):
             # print(f"get all cos")
             #just for visualization
             patch = copy.deepcopy(mask_img)
-            if patch.shape != (299, 299, 3):
+            if patch.shape != (sz, sz, 3):
                 continue
             ones = np.where(output_mask == 1)
             h1, h2, w1, w2 = ones[0].min(), ones[0].max(), ones[1].min(), ones[1].max()
@@ -424,19 +448,19 @@ class SuperconceptDiscovery(object):
             # plt.imshow(image)
             # plt.show()
             # image.save(f"./images/exp/verify/superkmeans/{img_id}_{j}.png")
-            # mask_img = np.array(image.resize((299,299), Image.BILINEAR)).astype(float)/255
+            # mask_img = np.array(image.resize((sz,sz), Image.BILINEAR)).astype(float)/255
             # image.close()
             # im_mask = Image.fromarray(np.array(mask_img*255).astype(np.uint8)).resize((299, 299), Image.BILINEAR)
             # im_mask.save(f"./images/exp/verify/superkmeans/mask_{img_id}_{j}.png")
             # im_mask.close()
 
-            # im_center = Image.fromarray(center).resize((299, 299), Image.BILINEAR)
+            # im_center = Image.fromarray(center).resize((sz, sz), Image.BILINEAR)
             # im_center.save("./images/exp/verify/superkmeans/center.png")
             # im_center.close()
             # print(f"get all cos ends")
             #mask_img = np.stack([m, m, m], axis=2)*img
             # print(f"mask img: {mask_img.shape}")
-            if mask_img.shape != (299,299,3):
+            if mask_img.shape != (sz,sz,3):
                 continue
             seg_act = np.mean(mymodel.run_examples(mask_img, 'layer4.2.conv3'), (1,2)).squeeze(0)
             mse = np.sum((center-seg_act)**2)
@@ -451,7 +475,7 @@ class SuperconceptDiscovery(object):
         mse_dic = {}
         for j in range(len(masks)):
             m = copy.deepcopy(masks[j])
-            mask_resized = np.array(Image.fromarray(m).resize((299,299), Image.BILINEAR))
+            mask_resized = np.array(Image.fromarray(m).resize((sz,sz), Image.BILINEAR))
             mask_expanded = np.expand_dims(mask_resized, -1)
             mask_img = (mask_expanded * img/255 + (1 - mask_expanded) * float(117) / 255)
                 #mask_img = np.stack([m, m, m], axis=2) * img
@@ -474,8 +498,8 @@ class SuperconceptDiscovery(object):
         for img_id, image_mask in tqdm(target_masks.items()):
             img_dic = {}
             img = np.array(Image.open(img_dir + self.discover_class_dict[self.target_class] + '/' + img_id).resize((299,299), Image.BILINEAR))
-            mask_resized = np.array(Image.fromarray(image_mask).resize((299,299), Image.BILINEAR))
-            if img.shape != (299,299,3):
+            mask_resized = np.array(Image.fromarray(image_mask).resize((sz,sz), Image.BILINEAR))
+            if img.shape != (sz,sz,3):
                 print('wrong shape')
                 continue
             for k, mean in means.items():
@@ -502,8 +526,8 @@ class SuperconceptDiscovery(object):
         for img_id, image_mask in tqdm(target_masks.items()):
             img_dic = {}
             img = np.array(Image.open(img_dir + self.discover_class_dict[self.target_class] + '/' + img_id).resize((299,299), Image.BILINEAR))
-            #mask_resized = np.array(Image.fromarray(image_mask).resize((299,299), Image.BILINEAR))
-            if img.shape != (299,299,3):
+            #mask_resized = np.array(Image.fromarray(image_mask).resize((sz,sz), Image.BILINEAR))
+            if img.shape != (sz,sz,3):
                 print('wrong shape')
                 continue
             for cls, mean in means.items():
@@ -514,13 +538,8 @@ class SuperconceptDiscovery(object):
                 img_dic[cls] = target_act
             result[img_id] = img_dic
         class_save_dir = os.path.join(self.save_dir, self.target_class)
-        torch.save(result, os.path.join(class_save_dir, '/val_acts.pth'))
+        torch.save(result, os.path.join(class_save_dir, 'val_acts.pth'))
         print(self.target_class, 'finished!')
-
-# save_dir = '/lab/andy/vibhav_data/superconcept/save_dir/' #store result
-# extraction_dir = '/lab/tmpig23c/u/andy/VR_SC/ACEdata/source/train500_imagenet/' #is img_dir and extraction_dir same?
-# extraction_dir = img_dir
-# mymodel = ace_helpers.make_model('Xception', 299,'/lab/tmpig8c/u/dw-code/ShELL_GPU/Pytorch/sorted_Xception_labels.json', 'cuda:1')
 
 def M_step(iter, target_class, res, discover_class_dict, extraction_dir, save_dir):
     vidx= {target_class:[]}
@@ -531,9 +550,9 @@ def M_step(iter, target_class, res, discover_class_dict, extraction_dir, save_di
         seg.append(res[i][2])
 
     for i, img_id in tqdm(enumerate(vidx[target_class][:n])):
-        img = np.array(Image.open(extraction_dir + discover_class_dict[target_class] + '/' + img_id).resize((299, 299), Image.BILINEAR))  # original image
+        img = np.array(Image.open(os.path.join(extraction_dir, discover_class_dict[target_class], img_id)).resize((299, 299), Image.BILINEAR))  # original image
         mask = copy.deepcopy(target_masks[img_id])
-        mask_resized = np.array(Image.fromarray(mask).resize((299, 299), Image.BILINEAR))
+        mask_resized = np.array(Image.fromarray(mask).resize((sz, sz), Image.BILINEAR))
         m = copy.deepcopy(mask_resized)
         # print(f"seg: {seg[i]}")
         # for j in range(1, mask_resized.max() + 1):
@@ -558,10 +577,10 @@ def M_step(iter, target_class, res, discover_class_dict, extraction_dir, save_di
                     image = Image.fromarray((patch[h1:h2, :] * 255).astype(np.uint8))
                 except:
                     image = Image.fromarray((patch * 255).astype(np.uint8))
-        # image_resized = np.array(image.resize((299,299), Image.BILINEAR)).astype(float)/255
+        # image_resized = np.array(image.resize((sz,sz), Image.BILINEAR)).astype(float)/255
 
         # out_img = image.resize((50,50), Image.BILINEAR)
-        save_path = os.path.join(save_dir, target_class, '/pass_'+str(iter), str(n)+'_robust')
+        save_path = os.path.join(save_dir, target_class, 'pass_'+str(iter), str(n)+'_robust')
         if not os.path.exists(save_path):
             # os.makedirs(f"./images/exp/{target_class}/pass1/{n}_robust")
             os.makedirs(save_path)
@@ -577,9 +596,9 @@ def E_step(iter, target_class, res, extraction_dir, save_dir):
         seg.append(res[i][2])
 
     for i, img_id in tqdm(enumerate(vidx[target_class])):
-        img = np.array(Image.open(extraction_dir + discover_class_dict[target_class] + '/' + img_id).resize((299, 299),Image.BILINEAR))  # original image
+        img = np.array(Image.open(os.path.join(extraction_dir, discover_class_dict[target_class], img_id)).resize((sz, sz),Image.BILINEAR))  # original image
         mask = copy.deepcopy(target_masks[img_id])
-        mask_resized = np.array(Image.fromarray(mask).resize((299, 299), Image.BILINEAR))
+        mask_resized = np.array(Image.fromarray(mask).resize((sz, sz), Image.BILINEAR))
         m = copy.deepcopy(mask_resized)
         # print(f"seg: {seg[i]}")
         # for j in range(1, mask_resized.max() + 1):
@@ -605,7 +624,7 @@ def E_step(iter, target_class, res, extraction_dir, save_dir):
                 except:
                     image = Image.fromarray((patch * 255).astype(np.uint8))
 
-        save_orig_path = os.path.join(save_dir, target_class, "/pass"+str(iter)+"_filtered_orig_size")
+        save_orig_path = os.path.join(save_dir, target_class, "pass"+str(iter)+"_filtered_orig_size")
         if not os.path.exists(save_orig_path):
             # os.makedirs(f"./images/exp/{target_class}/pass1_filtered_orig_size")
             os.makedirs(save_orig_path)
@@ -613,7 +632,7 @@ def E_step(iter, target_class, res, extraction_dir, save_dir):
         image.save(os.path.join(save_orig_path, img_id.replace("jpg", "png")))
 
         out_img = image.resize((50, 50), Image.BILINEAR)
-        save_rs_path = os.path.join(save_dir, target_class, "/pass"+str(iter)+"_filtered")
+        save_rs_path = os.path.join(save_dir, target_class, "pass"+str(iter)+"_filtered")
         if not os.path.exists(save_rs_path):
             # os.makedirs(f"./images/exp/{target_class}/pass1_filtered")
             os.makedirs(save_rs_path)
@@ -655,8 +674,11 @@ def parse_arguments(argv):
 
 if __name__=='__main__':
     argv = parse_arguments(sys.argv[1:])
+    if dataset == "voc":
+        mymodel = ace_helpers.make_model('ResNet50', sz, '/lab/tmpig8d/u/brian-data/VOCdevkit/VOC2012/VOC_labels.json', 'cuda:1')
+    elif dataset == "coco":
+        mymodel = ace_helpers.make_model('Q2L_COCO', sz, '/lab/tmpig8e/u/brian-data/COCO2017/VOC_COCO2017/label2id.json', 'cuda:0')
 
-    mymodel = ace_helpers.make_model('ResNet50', 299, '/lab/tmpig8d/u/brian-data/VOCdevkit/VOC2012/VOC_labels.json', 'cuda:1')
     feat_ex = timm.create_model('xception', features_only=True, out_indices=[0, 1, 2, 3, 4], pretrained=True)
 
     target_class = argv.target_class
@@ -666,7 +688,7 @@ if __name__=='__main__':
     save_dir = argv.save_root
 
     concept = SuperconceptDiscovery(mymodel, target_class, mask_dir, extraction_dir, img_dir, save_dir,
-                                 discover_class_dict, 'cuda:1', feat_ex)
+                                 discover_class_dict, 'cuda:0', feat_ex)
 
     all_valid_indexes = concept.extract_superconcept()  # extract valid img_ids
     # Without running EM

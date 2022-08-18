@@ -12,7 +12,7 @@ Below steps can be used to run the above file
 ImagetNet:
 
 ```python 
-python -W ignore::FutureWarning select_mask_em.py --img_root /lab/tmpig23c/u/andy/ILSVRC/Data/CLS-LOC/train/ --mask_root /lab/tmpig8d/u/zhix/Segement/Imagenet_mask/ --extraction_root /lab/tmpig23c/u/andy/ILSVRC/Data/CLS-LOC/train/ --save_root /lab/tmpig8c/u/brian_code/Pytorch/save_dir/ --num_iter 2 --pick 100 --pick_step 100 --target_class fire_engine
+python -W ignore::FutureWarning select_mask.py --img_root /lab/tmpig23c/u/andy/ILSVRC/Data/CLS-LOC/train/ --mask_root /lab/tmpig8d/u/zhix/Segement/Imagenet_mask/ --extraction_root /lab/tmpig23c/u/andy/ILSVRC/Data/CLS-LOC/train/ --save_root /lab/tmpig8c/u/brian_code/Pytorch/save_dir/ --num_iter 2 --pick 100 --pick_step 100 --target_class fire_engine
 ```
 
 Pascal VOC:
