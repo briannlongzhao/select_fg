@@ -3,31 +3,18 @@ import os
 import numpy as np
 import argparse
 import sys
-#sys.path.append('/lab/tmpig23/u/yao_code/Human-AI-Interface/')
-# # from matplotlib import pyplot as plt
-# # import matplotlib.gridspec as gridspec
-# # import tsnecuda
-# #import tcav.model as model
 from PIL import Image
-# #from skimage.segmentation import mark_boundaries
-# #from sklearn import linear_model
 from tqdm import tqdm
 import torch
-# #from torchvision import transforms
-# #from sklearn.model_selection import cross_val_score
-# #import tensorflow as tf
 import cv2
 import heapq
-# from model_Pytorch import *
-# from select_mask import *
-# from gradcam_pytorch import GradCAM_model
 import copy
 import timm
 import ace_helpers
 from scipy import spatial
 from sklearn import mixture
-# import scipy.optimize as opt
 import math
+import shutil
 import warnings
 warnings.filterwarnings("ignore")
 
@@ -540,6 +527,9 @@ if __name__=='__main__':
     save_dir = argv.save_root
     method = argv.method
     dataset = argv.dataset
+
+    shutil.rmtree(os.path.join(save_dir, target_class))
+    shutil.rmtree(os.path.join(save_dir, target_class+"_mask"))
 
     if dataset == "voc":
         mymodel = ace_helpers.make_model('ResNet50', 299, '/lab/tmpig8d/u/brian-data/VOCdevkit/VOC2012/VOC_labels.json', 'cuda:0')

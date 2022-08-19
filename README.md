@@ -9,7 +9,7 @@ pip install -r requirements.txt
 ```
 
 ## Arguments
-1. --img_root: Original training images, split by category in subdirectories. Can use default in code, or use "/lab/tmpig8d/u/brian-data/VOCdevkit/VOC2012/JPEGImages_split_multi_test" for debug (only contains 4 images of cow)
+1. --img_root: Original training images, split by category in subdirectories. Can use default in code, or use "/lab/tmpig8d/u/brian-data/VOCdevkit/VOC2012/JPEGImages_split_multi_test" for debug (only 4 images of cow)
 2. --mask_root: Output directory of Entity Segmentation, split by category in subdirectories. Can use default in code.
 4. --save_root: Output directory, will have one subdirectory for binary mask of foreground in png format and another subdirectory for result visualization.
 5. --num_iter: Number of iteration to run EM algorithm (default: 2).
