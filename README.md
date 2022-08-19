@@ -26,22 +26,20 @@ python -W ignore::FutureWarning select_mask_em_pascalvoc.py --img_root /lab/tmpi
 Following is the description for each command-line arguments:
 
 1. --img_root: 
-   This argument holds the directory for original images. For example, /lab/tmpig23c/u/andy/ILSVRC/Data/CLS-LOC/train/ holds
-   images for imagenet data
+   Original training images, split by category in subdirectories.
 2. --mask_root:
-   This argument holds directory for segmentation masks (in .npy format) generated from Entity Segmentation.
+   Output directory of Entity Segmentation, split by category in subdirectories.
 3. --extraction_root:
-   This currently is same as img_root but can be modified if required
+   This currently is same as img_root but can be modified if required. TODO: refactor
 4. --save_root:
-   This is the directory where all the outputs will be stored (details given below)
-5. --num_iter: Number of iteration to run EM algorithm (default: 2)
-6. --pick: How many images to pick in first iteration of EM algorithm (default: 200)
-7. --pick_step: By how much to increment pick in every step
+   Output directory, will have one subdirectory for binary mask of foreground in png format and another subdirectory for result visualization.
+5. --num_iter: Number of iteration to run EM algorithm (default: 2). TODO: refactor
+6. --pick: How many images to pick in first iteration of EM algorithm (default: 200). TODO: refactor
+7. --pick_step: By how much to increment pick in every step. TODO: Refactor
 8. --target_class: target class for which we need to run the EM algorithm
+9. --method: ["em","gmm"] or None. Use classifier and size information to filter foreground segment if None.
 
 Details for the output stored inside --save_root directory:
-In the test_setup save_dir is at `/lab/andy/vibhav_code/Pytorch/save_dir` path
-and below is the strucure:
 ```
 /lab/andy/vibhav_code/Pytorch/save_dir/
 ├── fire_engine

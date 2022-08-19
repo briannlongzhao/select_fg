@@ -12,6 +12,7 @@ from PIL import Image
 # #from skimage.segmentation import mark_boundaries
 # #from sklearn import linear_model
 from tqdm import tqdm
+import torch
 # #from torchvision import transforms
 # #from sklearn.model_selection import cross_val_score
 # #import tensorflow as tf
@@ -24,6 +25,7 @@ import copy
 import timm
 import ace_helpers
 from scipy import spatial
+from sklearn import mixture
 # import scipy.optimize as opt
 import math
 import warnings
@@ -83,6 +85,7 @@ class SuperconceptDiscovery(object):
         self.test_img_dir = test_img_dir
         self.discover_class_dict = discover_class_dict
         self.device_ = device_
+        self.filtered_indexes = []
 
     def load_concept_masks(self, target_class, mask_dir, img_dir):
 
@@ -285,7 +288,7 @@ class SuperconceptDiscovery(object):
             img_original = np.array(Image.open(os.path.join(self.extraction_dir, self.discover_class_dict[self.target_class], img_id)))
             img = np.array(Image.open(os.path.join(self.extraction_dir, self.discover_class_dict[self.target_class], img_id)).resize((299,299), Image.BILINEAR))
             resized_patch, patch, mask = self.extract_superpatch_center(img, image_mask, img_id)
-            if (resized_patch is None):
+            if resized_patch is None:
                 continue
             img_resized = resized_patch * 255
             # Use classifier to rule out unlikely concepts
@@ -294,6 +297,7 @@ class SuperconceptDiscovery(object):
             preds = (preds[0].cpu().numpy())
             if preds[target_class_idx] < 0.85:
                 print(img_id, preds[target_class_idx], "skip")
+                self.filtered_indexes.append()
                 continue
 
             self.valid_indexes[self.target_class].append(img_id)
@@ -542,7 +546,8 @@ def parse_arguments(argv):
     parser.add_argument('--ignore_large', type=float, default=0.8)
     parser.add_argument('--classifier_thresh', type=float, default=0.5)
     parser.add_argument('--debug', type=bool, default=False)
-    parser.add_argument('--target_class', type=str, default='school_bus')
+    parser.add_argument('--target_class', type=str)
+    parser.add_argument('--method', type=str, choices=["em","gmm"])
 
     return parser.parse_args(argv)
 
@@ -554,28 +559,57 @@ if __name__=='__main__':
     elif dataset == "coco":
         mymodel = ace_helpers.make_model('Q2L_COCO', sz, '/lab/tmpig8e/u/brian-data/COCO2017/VOC_COCO2017/label2id.json', 'cuda:0')
 
-    feat_ex = timm.create_model('xception', features_only=True, out_indices=[0, 1, 2, 3, 4], pretrained=True)
-
     target_class = argv.target_class
     img_dir = argv.img_root
     mask_dir = argv.mask_root
     extraction_dir = argv.extraction_root
     save_dir = argv.save_root
+    method = argv.method
 
-    concept = SuperconceptDiscovery(mymodel, target_class, mask_dir, extraction_dir, img_dir, save_dir,
-                                 discover_class_dict, 'cuda:0', feat_ex)
+    concept = SuperconceptDiscovery(mymodel, target_class, mask_dir, extraction_dir, img_dir, save_dir, discover_class_dict, 'cuda:0', None)
 
     all_valid_indexes = concept.extract_superconcept()  # extract valid img_ids
-    # Without running EM
-    print("Done without EM")
-    exit()
 
-    # For undiscovered images, random paste foreground to center
-    # discovered_images = all_valid_indexes[target_class]
-    # discovered_patched = list(zip(concept.super_concept_images))[1]
-    # for img_id, image_mask in tqdm(concept.target_masks.items()):
-    #     if img_id not in discovered_images:
-    #         pass
+    if method is None:
+        print("Done without EM")
+        exit()
+
+
+    if method == "gmm":
+        #feat_ex = timm.create_model('xception', features_only=True, out_indices=[0,1,2,3,4], pretrained=True)
+        feat_ex = timm.create_model('xception', pretrained=True)
+        feat_extracted = {}
+        def get_features(name):
+            def hook(model, input, output):
+                feat_extracted[name] = output.detach()
+            return hook
+        feat_ex.global_pool.register_forward_hook(get_features("feat"))
+        target_masks = concept.load_concept_masks(target_class, mask_dir, extraction_dir)  # load all segmentation masks
+        patches_tensor = torch.permute(torch.Tensor(concept.super_concept_patches), (0,3,1,2))
+        output = feat_ex(patches_tensor).detach().numpy()
+        feat_extracted = feat_extracted["feat"]
+        #feat_extracted = torch.flatten(feat_ex(patches_tensor)[-1], start_dim=1).detach().numpy()
+        lowest_bic = np.infty
+        bic = []
+        n_components_range = range(1, 9)
+        cv_types = ["spherical", "tied", "diag", "full"]
+        for n_components in n_components_range:
+            for cv_type in cv_types:
+                gmm = mixture.GaussianMixture(n_components=n_components, covariance_type=cv_type)
+                gmm.fit(feat_extracted)
+                bic.append(gmm.bic(feat_extracted))
+                if bic[-1] < lowest_bic:
+                    lowest_bic = bic[-1]
+                    best_gmm = gmm
+            print(n_components, cv_type)
+
+        gmm_means = best_gmm.means_
+        for images in concept.filtered_indexes:
+            for i in range(1,256):
+
+
+
+    exit()
 
     # EM
     target_masks = concept.load_concept_masks(target_class, mask_dir, extraction_dir)  # load masks
