@@ -10,7 +10,8 @@ import cv2
 import heapq
 import copy
 import timm
-import ace_helpers
+from pathlib import Path
+from model_wrapper import PytorchModelWrapper_public
 from scipy import spatial
 from sklearn import mixture
 import math
@@ -47,7 +48,7 @@ class SuperconceptDiscovery(object):
         self.model = model #ace model
         self.feat_ex = feat_ex #feature extractor
         self.target_class = target_class #for which concept is to be generated
-        self.mask_dir = mask_dir #Imagenet masks
+        self.mask_dir = mask_dir # Ent Seg mask
         self.extraction_dir = extraction_dir #
         self.save_dir = save_dir
         self.test_img_dir = test_img_dir
@@ -75,24 +76,24 @@ class SuperconceptDiscovery(object):
         """load the mask for the target_class images under the given img_dir"""
         """TODO: Modify for VOC or make generic for all datatypes"""
 
-        with open("/lab/tmpig8d/u/brian-data/VOCdevkit/VOC2012/pascalvoc_labels.json", 'r') as f:
-            # json example: {"0": ["n01443537", "goldfish"]}
-            # cats_dict: {"n01443537": (0, "goldfish")}
-            # class_dict: {"goldfish": "n01443537"}
-            cats = json.load(f)
-            cats_dict = {}
-            for k, v in cats.items():
-                cats_dict[v[0]] = (int(k), v[1])
+        # with open("/lab/tmpig8d/u/brian-data/VOCdevkit/VOC2012/pascalvoc_labels.json", 'r') as f:
+        #     # json example: {"0": ["n01443537", "goldfish"]}
+        #     # cats_dict: {"n01443537": (0, "goldfish")}
+        #     # class_dict: {"goldfish": "n01443537"}
+        #     cats = json.load(f)
+        #     cats_dict = {}
+        #     for k, v in cats.items():
+        #         cats_dict[v[0]] = (int(k), v[1])
 
-            class_dict = {}
-            tmp_cats = cats.items()
-            for k, v in tmp_cats:
-                class_dict[v[1]] = v[0]
+        #     class_dict = {}
+        #     tmp_cats = cats.items()
+        #     for k, v in tmp_cats:
+        #         class_dict[v[1]] = v[0]
 
         concept_img_id = {}
         concept_img_id[target_class] = []
         target_masks_dir = os.path.join(mask_dir, self.discover_class_dict[target_class])
-        image_dir = img_dir + self.discover_class_dict[target_class]
+        image_dir = img_dir / self.discover_class_dict[target_class]
         #print(f"image dir {image_dir}")
         #print(f"total masks: {len(os.listdir(image_dir))}")
         for i in os.listdir(os.path.join(img_dir, self.discover_class_dict[target_class])):
@@ -115,7 +116,7 @@ class SuperconceptDiscovery(object):
     def extract_superpatch_center(self, img, image_mask, img_id):
         img, x, preds = self.model.get_preds(img) # returns: i/p, i/p to n/w, preds
         pre_class = preds[0].argmax()
-        self.model.gradCAM_model.showCAMs(img, img_id, x=x.cuda(), chosen_class=pre_class, class_name=target_class, keep_percent=10)
+        self.model.gradCAM_model.showCAMs(img, img_id, x=x.cuda(), chosen_class=pre_class, class_name=self.target_class, keep_percent=10)
         cam3, cam = self.model.gradCAM_model.compute_heatmap(x=x.cuda(), classIdx=pre_class, keep_percent=20)
         if self.dataset == "voc":
             target_class_idx = int(''.join(c for c in self.discover_class_dict[self.target_class] if c.isdigit()))
@@ -256,10 +257,6 @@ class SuperconceptDiscovery(object):
         self.super_concept_embed_dic = {}
         self.valid_indexes = {self.target_class:[]}
         target_masks = self.load_concept_masks(self.target_class, self.mask_dir, self.extraction_dir)
-        if self.dataset == "voc":
-            target_class_idx = int(''.join(c for c in self.discover_class_dict[self.target_class] if c.isdigit()))
-        elif self.dataset == "coco":
-            target_class_idx = label2id[self.target_class]
         result_path = os.path.join(concept.save_dir, concept.target_class)
         mask_path = os.path.join(concept.save_dir,concept.target_class+"_mask")
         os.makedirs(result_path, exist_ok=True)
@@ -268,9 +265,8 @@ class SuperconceptDiscovery(object):
         #mymodel = timm.create_model('xception', pretrained=True)
         #gradCAM_model = GradCAM_model(mymodel, self.sz, 'cuda:0', gradcam_layer='layer4.2.conv3')
         for img_id, image_mask in tqdm(target_masks.items()):
-            img_original = np.array(Image.open(os.path.join(self.extraction_dir, self.discover_class_dict[self.target_class], img_id)))
-            img = np.array(Image.open(os.path.join(self.extraction_dir, self.discover_class_dict[self.target_class], img_id)).resize((299,299), Image.BILINEAR))
-            resized_patch, patch, mask = self.extract_superpatch_center(img, image_mask, img_id)
+            img = np.array(Image.open(os.path.join(self.extraction_dir, self.discover_class_dict[self.target_class], img_id)).resize((299,299), Image.BILINEAR)) # oriignal image, before GradCAM
+            resized_patch, patch, mask = self.extract_superpatch_center(img, image_mask, img_id) # image_mask: EntSeg Mask
             if resized_patch is None:
                 continue
             img_resized = resized_patch * 255
@@ -488,7 +484,7 @@ def E_step(iter, target_class, res, extraction_dir, save_dir, class_dict, img_sz
         out_img.close()
         image.close()
 
-def parse_arguments(argv):
+def parse_arguments():
     """Parses the arguments passed to the run.py script."""
     parser = argparse.ArgumentParser()
 
@@ -515,30 +511,37 @@ def parse_arguments(argv):
     parser.add_argument('--method', type=str, default="gmm", choices=["em","gmm"])
     parser.add_argument('--dataset', type=str, default="voc", choices=["coco", "voc"])
 
-    return parser.parse_args(argv)
+    args = parser.parse_args()
 
+    # additional op
+    args.save_root = Path(args.save_root)
+    args.mask_root = Path(args.mask_root)
+    args.img_root = Path(args.img_root)
+
+    if (args.save_root / args.target_class).exists():
+        shutil.rmtree(args.save_root / args.target_class)
+    if (args.save_root / f"{args.target_class}_mask").exists():
+        shutil.rmtree(args.save_root / f"{args.target_class}_mask")
+
+    return args
+
+def make_model(name, img_size, labels_path, device):
+    mymodel = PytorchModelWrapper_public(name, img_size, labels_path, device)
+    return mymodel
 
 if __name__=='__main__':
-    argv = parse_arguments(sys.argv[1:])
-    target_class = argv.target_class
-    img_dir = argv.img_root
-    mask_dir = argv.mask_root
-    extraction_dir = img_dir
-    save_dir = argv.save_root
-    method = argv.method
-    dataset = argv.dataset
+    args = parse_arguments()
 
-    shutil.rmtree(os.path.join(save_dir, target_class))
-    shutil.rmtree(os.path.join(save_dir, target_class+"_mask"))
-
-    if dataset == "voc":
-        mymodel = ace_helpers.make_model('ResNet50', 299, '/lab/tmpig8d/u/brian-data/VOCdevkit/VOC2012/VOC_labels.json', 'cuda:0')
-    elif dataset == "coco":
-        mymodel = ace_helpers.make_model('Q2L_COCO', 375, '/lab/tmpig8e/u/brian-data/COCO2017/VOC_COCO2017/label2id.json', 'cuda:0')
+    if args.dataset == "voc":
+        mymodel = make_model('ResNet50', 299, '/lab/tmpig8d/u/brian-data/VOCdevkit/VOC2012/VOC_labels.json', 'cuda:0')
+    elif args.dataset == "coco":
+        mymodel = make_model('Q2L_COCO', 375, '/lab/tmpig8e/u/brian-data/COCO2017/VOC_COCO2017/label2id.json', 'cuda:0')
 
     feat_ex = timm.create_model('xception', pretrained=True)
 
-    concept = SuperconceptDiscovery(mymodel, target_class, mask_dir, extraction_dir, img_dir, save_dir, 'cuda:0', feat_ex, dataset)
+    concept = SuperconceptDiscovery(
+        mymodel, args.target_class, args.mask_root, args.img_root, args.img_root, args.save_root, 
+        'cuda:0', feat_ex, args.dataset)
 
     all_valid_indexes = concept.extract_superconcept()  # extract valid img_ids
     # All extracted patches are stored in concept.super_concept_patches

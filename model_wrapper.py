@@ -107,7 +107,7 @@ class PytorchModelWrapper_public():
             self.model.avgpool = torch.nn.AdaptiveAvgPool2d(1)
             num_ftrs = self.model.fc.in_features
             self.model.fc = torch.nn.Linear(num_ftrs, 20)
-            self.model.load_state_dict(torch.load('pretrained_models/voc_multilabel/resnet50/model-2.pth'))
+            # self.model.load_state_dict(torch.load('pretrained_models/voc_multilabel/resnet50/model-2.pth'))
         elif model_to_run == "Q2L_COCO":
             def clean_state_dict(state_dict):
                 new_state_dict = OrderedDict()
