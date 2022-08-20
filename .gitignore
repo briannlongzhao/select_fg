@@ -130,3 +130,7 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+img_root
+VOCmask_entseg
+.vscode
+mask_test_gmm

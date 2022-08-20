@@ -1,10 +1,9 @@
-torch==1.10.1
-torchvision
+torch>=1.12.1
+torchvision>=0.13.1
 scikit-learn
-numpy==1.19.5
-matplotlib==3.3.1
-pillow==8.2.0
+numpy
+matplotlib
+pillow
 tqdm
-opencv-python==4.5.1.48
-timm==0.5.4
-protobuf==3.13.0
+opencv-python
+timm
