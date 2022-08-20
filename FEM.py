@@ -11,6 +11,7 @@ import numpy as np
 import torch
 from PIL import Image
 from scipy.spatial import distance
+from sklearn import mixture
 from tqdm.auto import tqdm
 
 from model import Model, FeatureExtractor
@@ -219,30 +220,46 @@ class FEM:
         best_image = self.extract_scaleup_RGB(output.img, best_m)
         return best_image, best_m
 
-    def M_step(self, images: Images, mode: str = "mean", k: float = 0.5) -> Tuple[Images, np.ndarray]:
+    def M_step(self, images: Images, k: float = 0.5, mode: str = "mean", metric: str = "euclidean",
+               # only in mode=gmm
+               n_cluster: int = 3, use_mahalanobis: bool = False) -> Tuple[Images, np.ndarray]:
         """
         step 2
         """
         # (N, d)
         embs = self.feat_extractor(map(lambda o: o.best_seg, images.values()))
         if mode == "mean":
-            # (d, )
+            # (1, d)
             mean_emb = embs.mean(0, keepdims=True)
-            """
-            filter @images by k% closet to @mean_emb
-            closest def by Euclidean Distance
-            """
             # (N, )
-            dist = distance.cdist(embs, mean_emb, metric="euclidean").squeeze()
-            top_k = int(k * len(embs))
-            top_k_indices = np.argpartition(dist, top_k)[:top_k]
-            images = OrderedDict({
-                img: output
-                for i, (img, output) in enumerate(images.items())
-                if i in top_k_indices
-            })
-        else:
-            raise NotImplementedError
+            dist = distance.cdist(embs, mean_emb, metric=metric).squeeze()
+        else: # gmm
+            gmm = mixture.GaussianMixture(n_components=n_cluster, random_state=42, covariance_type="tied")
+            # GMM param:
+            #   means_ (n_cluster, d)
+            #   covariances_ (d, d)
+            gmm = gmm.fit(embs)
+            if use_mahalanobis:
+                # NOTE: share covar
+                inv_covar = np.linalg.pinv(gmm.covariances_)
+                # (N, n_cluster)
+                dist = distance.cdist(embs, gmm.means_, metric="mahalanobis", VI=inv_covar)
+                dist = dist.min(axis=1)
+            else:
+                # (N, n_cluster)
+                dist = distance.cdist(embs, gmm.means_, metric=metric)
+                dist = dist.min(axis=1)
+        """
+        filter @images by k% closet to any of GMM cluster centroids
+        closest def by @metric (default Euclidean Distance) or Mahalanobis Distance (if @use_mahalanobis)
+        """
+        top_k = int(k * len(embs))
+        top_k_indices = np.argpartition(dist, top_k)[:top_k]
+        images = OrderedDict({
+            img: output
+            for i, (img, output) in enumerate(images.items())
+            if i in top_k_indices
+        })
         embs = self.feat_extractor(map(lambda o: o.best_seg, images.values()))
         mean_emb = embs.mean(0, keepdims=True)
         return images, mean_emb
@@ -251,7 +268,6 @@ class FEM:
         """
         step 3
         """
-
         def extract_image_gen(output):
             nonlocal possible_ent_segs
             for m in output:
@@ -274,8 +290,14 @@ class FEM:
     def save(self, images: Images, iter: int, output_dir: Path):
         """
         save intermediate results in @
-        output directory:
-            xxxx
+        output directory =>
+            <output_dir>
+                <target_class>
+                    xx.png
+                    yy.png
+                <target_class>_mask
+                    xx.png
+                    yy.png
         """
         if iter == -1:
             subdir = "step-1"
@@ -299,7 +321,6 @@ class FEM:
     def run(self):
         """
         run F-EM algorithm
-
         """
         images: Images = self.prepare(
             dataset=self.args.dataset, img_root=self.args.img_root, mask_root=self.args.mask_root,
@@ -310,6 +331,8 @@ class FEM:
         self.save(images, iter=-1, output_dir=self.args.save_root)
         orig_images = images.copy()
         for iter in tqdm(range(self.args.num_iter), desc="EM iter"):
-            _, mean_emb = self.M_step(images)
+            _, mean_emb = self.M_step(images,
+                mode=self.args.M_mode, k=self.args.M_k, metric=self.args.M_metric,
+                n_cluster=self.args.M_n_cluster, use_mahalanobis=self.args.M_mahalanobis)
             images = self.E_step(orig_images, mean_emb)
             self.save(images, iter, output_dir=self.args.save_root)

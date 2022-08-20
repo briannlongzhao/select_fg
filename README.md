@@ -59,3 +59,12 @@ class_name_mask/
 
 One can use the latest pass{int}_filtered output to see the output of the run 
 
+
+# Aug 20
+Run by
+```python
+python select_mask.py \
+   --img_root <img_root> --save_root <save> --dataset voc \
+   --num_iter 2 --target_class cow \
+   --method gmm --M_mode gmm --M_mahalanobis
+```

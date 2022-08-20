@@ -20,8 +20,15 @@ def parse_arguments():
                         default="./save_root")
 
     parser.add_argument('--num_iter', type=int, default=2)
-    parser.add_argument('--target_class', type=str)
+    parser.add_argument('--target_class', type=str, help="desired target class, must be in label2id")
     parser.add_argument('--dataset', type=str, default="voc", choices=["coco", "voc"])
+
+    # M step
+    parser.add_argument('--M_mode', type=str, default="mean", choices=["mean", "gmm"])
+    parser.add_argument('--M_metric', type=str, default="euclidean")
+    parser.add_argument('--M_k', type=float, default=0.5)
+    parser.add_argument('--M_n_cluster', type=int, default=3, help="only used if M_mode=gmm")
+    parser.add_argument('--M_mahalanobis', action="store_true", default=False, help="only used if M_mode=gmm")
 
     # TODO
     parser.add_argument('--pick', type=int, default=50)  # select 200
