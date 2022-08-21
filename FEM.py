@@ -48,9 +48,15 @@ class Output:
             m = (self.mask == entid).astype(int)
             yield m
 
-
-Images = Dict[str, Output]
-
+class Images(OrderedDict):
+    # Dict[str, Output]
+    def filter_by(self, key_set: list) -> 'Images':
+        return type(self)({
+            k:v for k,v in self.items()
+            if k in key_set
+        })
+    def all_best_segs(self) -> Iterator[np.ndarray]:
+        return map(lambda o: o.best_seg, self.values())
 
 class FEM:
     def __init__(self, args):
@@ -63,7 +69,7 @@ class FEM:
 
     def prepare(
             self,
-            dataset: str,
+            dataset: str, batch_size: int,
             img_root: Path,
             mask_root: Path,
             target_class: str,
@@ -92,7 +98,7 @@ class FEM:
             # self.model = PytorchModelWrapper_public('Q2L_COCO', 375, '/lab/tmpig8e/u/brian-data/COCO2017/VOC_COCO2017/label2id.json', 'cuda:0')
         self.model = self.model.to(device).eval()
         self.model.register_gradcam(layer_name=self.model.find_target_layer(), img_size=img_size)
-        self.feat_extractor = FeatureExtractor(feature_extractor)
+        self.feat_extractor = FeatureExtractor(feature_extractor, batch_size)
         self.feat_extractor = self.feat_extractor.to(device).eval()
 
         """
@@ -100,7 +106,8 @@ class FEM:
         images: Dict[imagename (eg 2007_000464.jpg) => Output]
             where Output = (image, seg mask, best seg (init None))
         """
-        images = OrderedDict()
+        # images = OrderedDict()
+        images = Images()
         for imgname in os.listdir(img_root / f"{self.target_class_id}_{target_class}"):
             imgname: str
             # imgname = imgname.split(".")[0] # no extension
@@ -130,6 +137,7 @@ class FEM:
             gradcam = self.model.compute_gradcam(output.img)
             best_seg, best_mask = self.best_seg_by_gradcam_center(output, gradcam, imageid)
             if best_seg is None:
+                images.pop(imageid)
                 continue
             images[imageid].best_seg = best_seg
             images[imageid].best_mask = best_mask
@@ -185,10 +193,10 @@ class FEM:
             if mask_area < 0.01 * m.size:
                 continue
             # Maybe not necessary because dist not likely to select large bg
-            # all_ones = np.where(m == 1)  # tuple of 2d indices
-            # h1, h2, w1, w2 = all_ones[0].min(), all_ones[0].max(), all_ones[1].min(), all_ones[1].max()
-            # if len(m) - 1 - h2 + h1 < 5 or len(m[0]) - 1 - w2 + w1 < 5:
-            #     continue
+            all_ones = np.where(m == 1)  # tuple of 2d indices
+            h1, h2, w1, w2 = all_ones[0].min(), all_ones[0].max(), all_ones[1].min(), all_ones[1].max()
+            if len(m)-1-h2+h1 < 10 or len(m[0])-1-w2+w1 < 10:
+                continue
 
             # avg of all pixel Euclidean distances to center of GradCAM
             dist = sum([
@@ -232,7 +240,7 @@ class FEM:
         d: feature dimension (2048 in xception)
         N: number of images
         """
-        embs = self.feat_extractor(map(lambda o: o.best_seg, images.values()))  # (N, d)
+        embs = self.feat_extractor.compute_embedding(images.all_best_segs())  # (N, d)
         if mode == "mean":
             mean_emb = embs.mean(0, keepdims=True)  # (1, d)
             dist = distance.cdist(embs, mean_emb, metric=metric).squeeze()  # (N, )
@@ -287,12 +295,12 @@ class FEM:
         """
         top_k = int(k * len(embs))
         top_k_indices = np.argpartition(dist, top_k)[:top_k]
-        images = OrderedDict({
+        images = Images({
             img: output
             for i, (img, output) in enumerate(images.items())
             if i in top_k_indices
         })
-        embs = self.feat_extractor(map(lambda o: o.best_seg, images.values()))
+        embs = self.feat_extractor.compute_embedding(images.all_best_segs())
         mean_emb = embs.mean(0, keepdims=True)
         return images, mean_emb
 
@@ -310,7 +318,7 @@ class FEM:
 
         for output in tqdm(orig_images.values(), desc="E step"):
             possible_ent_segs = []
-            emb = self.feat_extractor(extract_image_gen(output))
+            emb = self.feat_extractor.compute_embedding(extract_image_gen(output))
             assert emb.shape[0] == len(possible_ent_segs)
             # (N, )
             dist = distance.cdist(emb, mean_emb, metric="cosine").squeeze()
@@ -356,8 +364,14 @@ class FEM:
         """
         images: Images = self.prepare(
             dataset=self.args.dataset, img_root=self.args.img_root, mask_root=self.args.mask_root,
-            target_class=self.args.target_class,
+            target_class=self.args.target_class, batch_size=self.args.bsz,
             feature_extractor="xception", device="cuda:0")
+        if self.args.debug:
+            import random
+            keep_keys = random.sample(images.keys(), int(len(images) * 0.1))
+            print(f"only keeping random 10% of {len(images)} input, i.e. {len(keep_keys)}")
+            keep_keys = random.sample(images.keys(), int(len(images) * 0.1))
+            images = images.filter_by(keep_keys)
 
         images = self.select_seg_by_gradcam(images)
         self.save(images, iter=-1, output_dir=self.args.save_root)

@@ -77,27 +77,37 @@ class Model(nn.Module):
 
 
 class FeatureExtractor(nn.Module):
-    def __init__(self, model_name: str):
+    def __init__(self, model_name: str, batch_size: int):
         super().__init__()
         assert model_name in timm.list_models(pretrained=True)
         self.model = timm.create_model(model_name, pretrained=True, num_classes=0)
+        self.batch_size = batch_size
+        self.transform = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
+        ])
 
     @property
     def device(self):
         return next(self.parameters()).device
 
+    def forward(self, segs):
+        # (N, C=3, H, W) -> (N, d)
+        embs = self.model(segs)
+        return embs.cpu().numpy()
+    
     @torch.no_grad()
-    def forward(self, images: Iterator[np.ndarray]) -> np.ndarray:
-        transform = transforms.Compose([
-            transforms.ToTensor(),
-            transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
-        ])
-        best_segs = [
-            transform(Image.fromarray(output))
-            for output in images
+    def compute_embedding(self, images: Iterator[np.ndarray]) -> np.ndarray:
+        segs = [
+            self.transform(Image.fromarray(image))
+            for image in images
         ]
         # (N, C=3, H, W)
-        best_segs = torch.stack(best_segs, dim=0).to(self.device)
+        segs = torch.stack(segs, dim=0)
+        embs = []
+        for seg in segs.split(self.batch_size):
+            # each seg (bsz, 3, H, W)
+            emb = self(seg.to(self.device))
+            embs.append(emb)
         # (N, d)
-        embs = self.model(best_segs)
-        return embs.cpu().numpy()
+        return np.concatenate(embs, axis=0)

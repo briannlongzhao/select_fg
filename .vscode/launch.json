@@ -13,24 +13,47 @@
       "justMyCode": true,
       "args": [
         "--img_root",
-        "/lab/tmpig8d/u/brian-data/VOCdevkit/VOC2012/JPEGImages_split_multi_test",
+        "/lab/tmpig8d/u/brian-data/VOCdevkit/VOC2012/JPEGImages_split_multi",
         "--save_root",
         "./mask_test_gmm",
+        "--mask_root",
+        "/lab/tmpig8d/u/brian-data/VOCdevkit/VOC2012/VOCmask_entseg",
         "--dataset",
         "voc",
         "--num_iter",
         "2",
-        "--pick",
-        "50",
-        "--pick_step",
-        "50",
-        "--target_class",
-        "cow",
-        "--method",
-        "gmm"
+        "--debug",
+        "--target_class", "cow",
+        "--M_mode", "gmm_full"
       ],
       "env": {
-        "CUDA_VISIBLE_DEVICES": "0"
+        "CUDA_VISIBLE_DEVICES": "1"
+      }
+    },
+    {
+      "name": "select fg old",
+      "type": "python",
+      "request": "launch",
+      "program": "select_mask.py",
+      "console": "integratedTerminal",
+      "justMyCode": true,
+      "cwd": "${workspaceFolder}/select_fg",
+      "args": [
+        "--img_root",
+        "/lab/tmpig8d/u/brian-data/VOCdevkit/VOC2012/JPEGImages_split_multi",
+        "--save_root",
+        "./mask_test_gmm",
+        "--mask_root",
+        "/lab/tmpig8d/u/brian-data/VOCdevkit/VOC2012/VOCmask_entseg",
+        "--dataset",
+        "voc",
+        "--num_iter",
+        "2",
+        "--target_class", "cow",
+        "--method", "gmm",
+      ],
+      "env": {
+        "CUDA_VISIBLE_DEVICES": "1"
       }
     }
   ]

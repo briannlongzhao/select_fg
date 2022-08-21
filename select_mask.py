@@ -22,6 +22,8 @@ def parse_arguments():
     parser.add_argument('--num_iter', type=int, default=2)
     parser.add_argument('--target_class', type=str, help="desired target class, must be in label2id")
     parser.add_argument('--dataset', type=str, default="voc", choices=["coco", "voc"])
+    parser.add_argument('--debug', action="store_true", default=False, help="if set, only run F-EM on 10% of input")
+    parser.add_argument('--bsz', type=int, default=16, help="batch size used in computing feature by feature extractor")
 
     # M step
     parser.add_argument('--M_mode', type=str, default="mean", choices=["mean", "gmm_tied", "gmm_full"])
