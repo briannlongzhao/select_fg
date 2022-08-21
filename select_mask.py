@@ -24,7 +24,7 @@ def parse_arguments():
     parser.add_argument('--dataset', type=str, default="voc", choices=["coco", "voc"])
 
     # M step
-    parser.add_argument('--M_mode', type=str, default="mean", choices=["mean", "gmm"])
+    parser.add_argument('--M_mode', type=str, default="mean", choices=["mean", "gmm_tied", "gmm_full"])
     parser.add_argument('--M_metric', type=str, default="euclidean")
     parser.add_argument('--M_k', type=float, default=0.5)
     parser.add_argument('--M_n_cluster', type=int, default=3, help="only used if M_mode=gmm")
@@ -45,10 +45,8 @@ def parse_arguments():
     args.mask_root = Path(args.mask_root)
     args.img_root = Path(args.img_root)
 
-    if (args.save_root / args.target_class).exists():
-        shutil.rmtree(args.save_root / args.target_class)
-    if (args.save_root / f"{args.target_class}_mask").exists():
-        shutil.rmtree(args.save_root / f"{args.target_class}_mask")
+    for path in args.save_root.glob(f"*/{args.target_class}*"):
+        shutil.rmtree(path)
 
     return args
 
