@@ -20,7 +20,7 @@ from model import Model, FeatureExtractor
 @dataclass
 class Output:
     """
-    H, W should be same (hard code as 299)
+    H, W should be same (hard code as 299 in voc)
     """
     # RGB (H, W, 3)
     img: np.ndarray
@@ -61,8 +61,15 @@ class FEM:
         self.label2id: Dict[str, int]
         self.model: Model
 
-    def prepare(self, dataset: str, img_root: Path, mask_root: Path, target_class: str,
-                feature_extractor: str = "xception", device="cuda:0") -> Images:
+    def prepare(
+            self,
+            dataset: str,
+            img_root: Path,
+            mask_root: Path,
+            target_class: str,
+            feature_extractor: str = "xception",
+            device="cuda:0"
+    ) -> Images:
         """
         setup necessary model
         must be called first
@@ -75,13 +82,14 @@ class FEM:
         if dataset == "voc":
             model_name = "resnet"
             img_size = 299
-            with open(mask_root / "VOC_labels.json") as f:
+            with open("metadata/voc_label2id.json") as f:
                 self.label2id = json.load(f)
             self.target_class_id = int(self.label2id[target_class])
+            self.model = Model(model_name)  # Classifier
         else:
+            #TODO: add coco classification model and configs
             raise NotImplementedError
             # self.model = PytorchModelWrapper_public('Q2L_COCO', 375, '/lab/tmpig8e/u/brian-data/COCO2017/VOC_COCO2017/label2id.json', 'cuda:0')
-        self.model = Model(model_name)
         self.model = self.model.to(device).eval()
         self.model.register_gradcam(layer_name=self.model.find_target_layer(), img_size=img_size)
         self.feat_extractor = FeatureExtractor(feature_extractor)
@@ -120,7 +128,7 @@ class FEM:
         for imageid, output in tqdm(images.items(), desc="selecting seg by GradCAM"):
             output: Output
             gradcam = self.model.compute_gradcam(output.img)
-            best_seg, best_mask = self.best_seg_by_gradcam_center(output, gradcam)
+            best_seg, best_mask = self.best_seg_by_gradcam_center(output, gradcam, imageid)
             if best_seg is None:
                 continue
             images[imageid].best_seg = best_seg
@@ -149,20 +157,17 @@ class FEM:
         return np.array(extracted_image)
 
     @torch.no_grad()
-    def best_seg_by_gradcam_center(self, output: Output, gradcam):
+    def best_seg_by_gradcam_center(self, output: Output, gradcam, imagename):
         """
         for all possible seg in @segmask, select best one
         :param output: contains
-            img: (H, W, 3) riginal image
+            img: (H, W, 3) original image
             mask: (H, W) mask, pixel value 1-#seg & 255 (dummy)
         :param gradcam: (H, W) GradCAM heatmap, binary
         :return: (masked image, mask)
             where mask is one of seg in @segmask, (H, W) binary, 1 = object
             and image is corresponding mask's region in @img but scaled up (H, W, 3) RGB int unnormalized
             NOTE: both None if no best seg is found
-        """
-        """
-        gradcam center
         """
         M = cv2.moments(gradcam, binaryImage=True)
         if M["m00"] == 0.0:
@@ -179,12 +184,11 @@ class FEM:
             mask_area = np.count_nonzero(m)
             if mask_area < 0.01 * m.size:
                 continue
-            elif mask_area > 0.8 * m.size:
-                continue
             all_ones = np.where(m == 1)  # tuple of 2d indices
             h1, h2, w1, w2 = all_ones[0].min(), all_ones[0].max(), all_ones[1].min(), all_ones[1].max()
-            if len(m) - 1 - h2 + h1 < 10 or len(m[0]) - 1 - w2 + w1 < 10:
-                continue
+            # Maybe not necessary because dist not likely to select large bg
+            # if len(m) - 1 - h2 + h1 < 5 or len(m[0]) - 1 - w2 + w1 < 5:
+            #     continue
 
             # avg of all pixel Euclidean distance to center of GradCAM
             dist = sum([
@@ -194,7 +198,7 @@ class FEM:
             ]) / mask_area
             dists.append([dist, m])
         if len(dists) == 0:
-            # ignore this image
+            print("No proper segment in", imagename)
             return None, None
 
         """
@@ -224,16 +228,15 @@ class FEM:
                # only in mode=gmm
                n_cluster: int = 3, use_mahalanobis: bool = False) -> Tuple[Images, np.ndarray]:
         """
-        step 2
+        step 2: Calculate / Update mean of patch embeddings using k% closest to mean
+        d: feature dimension (2048 in xception)
+        N: number of images
         """
-        # (N, d)
-        embs = self.feat_extractor(map(lambda o: o.best_seg, images.values()))
+        embs = self.feat_extractor(map(lambda o: o.best_seg, images.values()))  # (N, d)
         if mode == "mean":
-            # (1, d)
-            mean_emb = embs.mean(0, keepdims=True)
-            # (N, )
-            dist = distance.cdist(embs, mean_emb, metric=metric).squeeze()
-        else: # gmm
+            mean_emb = embs.mean(0, keepdims=True)  # (1, d)
+            dist = distance.cdist(embs, mean_emb, metric=metric).squeeze()  # (N, )
+        elif mode == "gmm_tied":
             gmm = mixture.GaussianMixture(n_components=n_cluster, random_state=42, covariance_type="tied")
             # GMM param:
             #   means_ (n_cluster, d)
@@ -249,6 +252,25 @@ class FEM:
                 # (N, n_cluster)
                 dist = distance.cdist(embs, gmm.means_, metric=metric)
                 dist = dist.min(axis=1)
+        elif mode == "gmm_full":
+            lowest_bic = np.infty
+            bic = []
+            n_components_range = range(1, min(9, len(embs)))
+            for n_components in n_components_range:
+                gmm = mixture.GaussianMixture(n_components=n_components, covariance_type="full")
+                gmm.fit(embs)
+                bic.append(gmm.bic(embs))
+                if bic[-1] < lowest_bic:
+                    lowest_bic = bic[-1]
+                    best_gmm = gmm
+            if use_mahalanobis:
+                #TODO:
+                pass
+            else:
+                dist = distance.cdist(embs, best_gmm.means_, metric=metric)
+                dist = dist.min(axis=1)
+        else:
+            raise NotImplementedError
         """
         filter @images by k% closet to any of GMM cluster centroids
         closest def by @metric (default Euclidean Distance) or Mahalanobis Distance (if @use_mahalanobis)
@@ -331,8 +353,13 @@ class FEM:
         self.save(images, iter=-1, output_dir=self.args.save_root)
         orig_images = images.copy()
         for iter in tqdm(range(self.args.num_iter), desc="EM iter"):
-            _, mean_emb = self.M_step(images,
-                mode=self.args.M_mode, k=self.args.M_k, metric=self.args.M_metric,
-                n_cluster=self.args.M_n_cluster, use_mahalanobis=self.args.M_mahalanobis)
+            _, mean_emb = self.M_step(
+                images,
+                mode=self.args.M_mode,
+                k=self.args.M_k,
+                metric=self.args.M_metric,
+                n_cluster=self.args.M_n_cluster,
+                use_mahalanobis=self.args.M_mahalanobis
+            )
             images = self.E_step(orig_images, mean_emb)
             self.save(images, iter, output_dir=self.args.save_root)
