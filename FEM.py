@@ -325,8 +325,6 @@ class FEM:
             assert emb.shape[0] == len(possible_ent_segs)
             # (N, )
             dist = distance.cdist(emb, mean_emb, metric="cosine").squeeze()
-            if dist.ndim == 2:
-                dist = dist.min(axis=1)
             best_idx = dist.argmin()
             output.best_mask, output.best_seg = possible_ent_segs[best_idx]
 
