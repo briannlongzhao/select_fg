@@ -87,7 +87,7 @@ class FEM:
             self.target_class_id = int(self.label2id[target_class])
             self.model = Model(model_name)  # Classifier
         else:
-            #TODO: add coco classification model and configs
+            # TODO: add coco classification model and configs
             raise NotImplementedError
             # self.model = PytorchModelWrapper_public('Q2L_COCO', 375, '/lab/tmpig8e/u/brian-data/COCO2017/VOC_COCO2017/label2id.json', 'cuda:0')
         self.model = self.model.to(device).eval()
@@ -184,13 +184,13 @@ class FEM:
             mask_area = np.count_nonzero(m)
             if mask_area < 0.01 * m.size:
                 continue
-            all_ones = np.where(m == 1)  # tuple of 2d indices
-            h1, h2, w1, w2 = all_ones[0].min(), all_ones[0].max(), all_ones[1].min(), all_ones[1].max()
             # Maybe not necessary because dist not likely to select large bg
+            # all_ones = np.where(m == 1)  # tuple of 2d indices
+            # h1, h2, w1, w2 = all_ones[0].min(), all_ones[0].max(), all_ones[1].min(), all_ones[1].max()
             # if len(m) - 1 - h2 + h1 < 5 or len(m[0]) - 1 - w2 + w1 < 5:
             #     continue
 
-            # avg of all pixel Euclidean distance to center of GradCAM
+            # avg of all pixel Euclidean distances to center of GradCAM
             dist = sum([
                 distance.euclidean([x, y], [cx, cy])
                 for (x, y), val in np.ndenumerate(m)
@@ -226,7 +226,7 @@ class FEM:
 
     def M_step(self, images: Images, k: float = 0.5, mode: str = "mean", metric: str = "euclidean",
                # only in mode=gmm
-               n_cluster: int = 3, use_mahalanobis: bool = False) -> Tuple[Images, np.ndarray]:
+               n_cluster: Optional[int] = None, use_mahalanobis: bool = False) -> Tuple[Images, np.ndarray]:
         """
         step 2: Calculate / Update mean of patch embeddings using k% closest to mean
         d: feature dimension (2048 in xception)
@@ -236,41 +236,51 @@ class FEM:
         if mode == "mean":
             mean_emb = embs.mean(0, keepdims=True)  # (1, d)
             dist = distance.cdist(embs, mean_emb, metric=metric).squeeze()  # (N, )
-        elif mode == "gmm_tied":
-            gmm = mixture.GaussianMixture(n_components=n_cluster, random_state=42, covariance_type="tied")
-            # GMM param:
-            #   means_ (n_cluster, d)
-            #   covariances_ (d, d)
-            gmm = gmm.fit(embs)
+        else:  # gmm
+            """
+            either use designated @n_cluster or, pick best n_cluster by lowest bic
+            """
+            covariance_type = "tie" if mode == "gmm_tied" else "full"
+            if n_cluster is not None:
+                n_components_range = [n_cluster]
+            else:
+                n_components_range = range(1, min(9, len(embs)))
+            best_bic, best_gmm = float("inf"), None
+            for n_component in n_components_range:
+                # GMM param:
+                #   means_ (n_cluster, d)
+                #   covariances_ if full: (n_cluster, d, d); if tie: (d, d)
+                gmm = mixture.GaussianMixture(n_components=n_component, random_state=42,
+                                              covariance_type=covariance_type)
+                gmm = gmm.fit(embs)
+                bic = gmm.bic(embs)
+                if bic < best_bic:
+                    best_bic, best_gmm = bic, gmm
+            """
+            compute distance
+            1. use mahalanobis distance
+                1.1. if gmm_tie: use shared covar (all clusters have same covar matrix (d, d))
+                1.2. if gmm_full: each cluster has one covar, compute distance for each cluster
+            2. else, use @metric
+            """
             if use_mahalanobis:
-                # NOTE: share covar
-                inv_covar = np.linalg.pinv(gmm.covariances_)
-                # (N, n_cluster)
-                dist = distance.cdist(embs, gmm.means_, metric="mahalanobis", VI=inv_covar)
+                if mode == "gmm_tie":
+                    # NOTE: share covar
+                    inv_covar = np.linalg.pinv(gmm.covariances_)
+                    # (N, n_cluster)
+                    dist = distance.cdist(embs, gmm.means_, metric="mahalanobis", VI=inv_covar)
+                else:
+                    means, covars = best_gmm.means_, best_gmm.covariances_
+                    # (N, n_cluster)
+                    dist = np.zeros((len(embs), len(means))).astype("float")
+                    for i_cluster, (mean, covar) in enumerate(zip(means, covars)):
+                        inv_covar = np.linalg.pinv(covar)
+                        dist[:, i_cluster] = distance.cdist(embs, mean[np.newaxis, :], metric="mahalanobis", VI=inv_covar).squeeze()
                 dist = dist.min(axis=1)
             else:
                 # (N, n_cluster)
-                dist = distance.cdist(embs, gmm.means_, metric=metric)
-                dist = dist.min(axis=1)
-        elif mode == "gmm_full":
-            lowest_bic = np.infty
-            bic = []
-            n_components_range = range(1, min(9, len(embs)))
-            for n_components in n_components_range:
-                gmm = mixture.GaussianMixture(n_components=n_components, covariance_type="full")
-                gmm.fit(embs)
-                bic.append(gmm.bic(embs))
-                if bic[-1] < lowest_bic:
-                    lowest_bic = bic[-1]
-                    best_gmm = gmm
-            if use_mahalanobis:
-                #TODO:
-                pass
-            else:
                 dist = distance.cdist(embs, best_gmm.means_, metric=metric)
                 dist = dist.min(axis=1)
-        else:
-            raise NotImplementedError
         """
         filter @images by k% closet to any of GMM cluster centroids
         closest def by @metric (default Euclidean Distance) or Mahalanobis Distance (if @use_mahalanobis)
