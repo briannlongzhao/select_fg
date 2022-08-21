@@ -19,9 +19,8 @@ class Model(nn.Module):
             self.model.avgpool = torch.nn.AdaptiveAvgPool2d(1)
             num_ftrs = self.model.fc.in_features
             self.model.fc = torch.nn.Linear(num_ftrs, 20)
-            # TODO
-            # self.model.load_state_dict(torch.load('pretrained_models/voc_multilabel/resnet50/model-2.pth'))
-        else:  # "coco"
+            self.model.load_state_dict(torch.load('/lab/briannlz/select_fg/pretrained_models/voc_multilabel/resnet50/model-2.pth'))
+        else:  #TODO: add coco classifier
             raise NotImplementedError
 
     @property

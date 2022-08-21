@@ -300,8 +300,11 @@ class FEM:
             for i, (img, output) in enumerate(images.items())
             if i in top_k_indices
         })
-        embs = self.feat_extractor.compute_embedding(images.all_best_segs())
-        mean_emb = embs.mean(0, keepdims=True)
+        if mode == "mean":
+            embs = self.feat_extractor.compute_embedding(images.all_best_segs())
+            mean_emb = embs.mean(0, keepdims=True)
+        else: # gmm
+            mean_emb = best_gmm.means_.mean(0, keepdims=True) # (n_cluster, d) -> (1, d)
         return images, mean_emb
 
     def E_step(self, orig_images: Images, mean_emb):
@@ -322,6 +325,8 @@ class FEM:
             assert emb.shape[0] == len(possible_ent_segs)
             # (N, )
             dist = distance.cdist(emb, mean_emb, metric="cosine").squeeze()
+            if dist.ndim == 2:
+                dist = dist.min(axis=1)
             best_idx = dist.argmin()
             output.best_mask, output.best_seg = possible_ent_segs[best_idx]
 
