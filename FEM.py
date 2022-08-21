@@ -239,6 +239,9 @@ class FEM:
         step 2: Calculate / Update mean of patch embeddings using k% closest to mean
         d: feature dimension (2048 in xception)
         N: number of images
+        :return Images and also mean_emb
+            if mode = mean: mean_emb (1, d)
+            if mode is any gmm: mean_emb (n_cluster, d)
         """
         embs = self.feat_extractor.compute_embedding(images.all_best_segs())  # (N, d)
         if mode == "mean":
@@ -304,7 +307,7 @@ class FEM:
             embs = self.feat_extractor.compute_embedding(images.all_best_segs())
             mean_emb = embs.mean(0, keepdims=True)
         else: # gmm
-            mean_emb = best_gmm.means_.mean(0, keepdims=True) # (n_cluster, d) -> (1, d)
+            mean_emb = best_gmm.means_
         return images, mean_emb
 
     def E_step(self, orig_images: Images, mean_emb):
@@ -323,8 +326,10 @@ class FEM:
             possible_ent_segs = []
             emb = self.feat_extractor.compute_embedding(extract_image_gen(output))
             assert emb.shape[0] == len(possible_ent_segs)
+            # (N, n_cluster)
+            dist = distance.cdist(emb, mean_emb, metric="cosine")
             # (N, )
-            dist = distance.cdist(emb, mean_emb, metric="cosine").squeeze()
+            dist = dist.min(1)
             best_idx = dist.argmin()
             output.best_mask, output.best_seg = possible_ent_segs[best_idx]
 
