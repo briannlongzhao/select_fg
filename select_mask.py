@@ -27,16 +27,8 @@ def parse_arguments():
     parser.add_argument('--M_mode', type=str, default="mean", choices=["mean", "gmm_tied", "gmm_full"])
     parser.add_argument('--M_metric', type=str, default="euclidean")
     parser.add_argument('--M_k', type=float, default=0.5)
-    parser.add_argument('--M_n_cluster', type=int, default=3, help="only used if M_mode=gmm")
+    parser.add_argument('--M_n_cluster', type=int, default=None, help="only used if M_mode=gmm, if not set, try to find best n_cluster")
     parser.add_argument('--M_mahalanobis', action="store_true", default=False, help="only used if M_mode=gmm")
-
-    # TODO
-    parser.add_argument('--pick', type=int, default=50)  # select 200
-    parser.add_argument('--pick_step', type=int, default=100)
-    parser.add_argument('--ignore_small', type=float, default=0.01)
-    parser.add_argument('--ignore_large', type=float, default=0.8)
-    parser.add_argument('--classifier_thresh', type=float, default=0.5)
-    parser.add_argument('--method', type=str, default="gmm", choices=["em", "gmm"])
 
     args = parser.parse_args()
 
