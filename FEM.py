@@ -66,10 +66,12 @@ class FEM:
         self.target_class_id: int
         self.label2id: Dict[str, int]
         self.model: Model
+        self.img_size: int
 
     def prepare(
             self,
-            dataset: str, batch_size: int,
+            dataset: str,
+            batch_size: int,
             img_root: Path,
             mask_root: Path,
             target_class: str,
@@ -87,17 +89,20 @@ class FEM:
         self.target_class = target_class
         if dataset == "voc":
             model_name = "resnet"
-            img_size = 299
+            self.img_size = 299
             with open("metadata/voc_label2id.json") as f:
                 self.label2id = json.load(f)
             self.target_class_id = int(self.label2id[target_class])
             self.model = Model(model_name)  # Classifier
-        else:
+        elif dataset == "coco":
             # TODO: add coco classification model and configs
+            self.img_size = 375
             raise NotImplementedError
             # self.model = PytorchModelWrapper_public('Q2L_COCO', 375, '/lab/tmpig8e/u/brian-data/COCO2017/VOC_COCO2017/label2id.json', 'cuda:0')
+        else:
+            raise NotImplementedError
         self.model = self.model.to(device).eval()
-        self.model.register_gradcam(layer_name=self.model.find_target_layer(), img_size=img_size)
+        self.model.register_gradcam(layer_name=self.model.find_target_layer(), img_size=self.img_size)
         self.feat_extractor = FeatureExtractor(feature_extractor, batch_size)
         self.feat_extractor = self.feat_extractor.to(device).eval()
 
@@ -112,16 +117,16 @@ class FEM:
             imgname: str
             # imgname = imgname.split(".")[0] # no extension
             img_path = img_root / f"{self.target_class_id}_{target_class}" / imgname
-            # (299, 299, 3)
-            img = Image.open(img_path).resize((299, 299), Image.BILINEAR)
+            # (image_size, image_size, 3)
+            img = Image.open(img_path).resize((self.img_size, self.img_size), Image.BILINEAR)
             img = np.array(img)
             mask_path = mask_root / f"{self.target_class_id}_{target_class}" / f"{imgname}.npy"
             assert mask_path.exists(), f"mask file {mask_path} must exist!!"
             # (H, W)
             # pixel value 1-#ent & 255
             entseg_mask = np.load(mask_path)
-            # (299, 299)
-            entseg_mask = Image.fromarray(entseg_mask).resize((299, 299), Image.NEAREST)
+            # (self.image_size, self.image_size)
+            entseg_mask = Image.fromarray(entseg_mask).resize((self.img_size, self.img_size), Image.NEAREST)
             entseg_mask = np.array(entseg_mask)
             images[imgname] = Output(img=img, mask=entseg_mask)
         return images
@@ -180,7 +185,7 @@ class FEM:
         M = cv2.moments(gradcam, binaryImage=True)
         if M["m00"] == 0.0:
             M["m00"] = 0.001
-        H, W = gradcam.shape  # should be always 299, 299
+        H, W = gradcam.shape  # should be always self.image_size, self.image_size
         cx = min(M["m01"] / M["m00"], H - 1)
         cy = min(M["m10"] / M["m00"], W - 1)
 
@@ -253,7 +258,7 @@ class FEM:
             """
             either use designated @n_cluster or, pick best n_cluster by lowest bic
             """
-            covariance_type = "tie" if mode == "gmm_tied" else "full"
+            covariance_type = "tied" if mode == "gmm_tied" else "full"
             if n_cluster is not None:
                 n_components_range = [n_cluster]
             else:
@@ -264,7 +269,7 @@ class FEM:
                 #   means_ (n_cluster, d)
                 #   covariances_ if full: (n_cluster, d, d); if tie: (d, d)
                 gmm = mixture.GaussianMixture(n_components=n_component, random_state=42,
-                                              covariance_type=covariance_type)
+                                              covariance_type=covariance_type, reg_covar=1e-5)
                 gmm = gmm.fit(embs)
                 bic = gmm.bic(embs)
                 if bic < best_bic:
@@ -277,7 +282,7 @@ class FEM:
             2. else, use @metric
             """
             if metric == "mahalanobis":
-                if mode == "gmm_tie":
+                if mode == "gmm_tied":
                     # NOTE: share covar
                     inv_covar = np.linalg.pinv(gmm.covariances_)
                     # (N, n_cluster)
@@ -314,7 +319,7 @@ class FEM:
 
     def E_step(self, orig_images: Images, mean_emb):
         """
-        step 3
+        step 3: For each segment compute distance /similarity to the updated means and select the best
         """
         def extract_image_gen(output):
             nonlocal possible_ent_segs
