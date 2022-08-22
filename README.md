@@ -49,3 +49,12 @@ The following variants are supported:
   `--M_mode gmm_tie --M_metric <any metric>`
  
 NOTE: `M_metric` can be any metric in [scipy](https://docs.scipy.org/doc/scipy/reference/generated/scipy.spatial.distance.cdist.html#scipy.spatial.distance.cdist), including `mahalanobis`.
+
+Also, you can use two directories in `sample_inputs` as test for `--img_root` and `--mask_root`. 
+
+# TODO
+- how to get `mask_root`?
+
+- COCO format
+
+- which variant is best for VOC
