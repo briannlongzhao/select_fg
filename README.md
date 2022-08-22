@@ -58,3 +58,5 @@ Also, you can use two directories in `sample_inputs` as test for `--img_root` an
 - COCO format
 
 - which variant is best for VOC
+
+- argument for feature extractor and pretrain resnet ckpt

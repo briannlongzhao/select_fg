@@ -132,7 +132,7 @@ class FEM:
         Given EntSeg, compute GradCAM for each image, then select best seg (only 1 for each image) based on GradCAM
         update @Images `best_seg` field
         """
-        for imageid, output in tqdm(images.items(), desc="selecting seg by GradCAM"):
+        for imageid, output in tqdm(images.copy().items(), desc="selecting seg by GradCAM"):
             output: Output
             gradcam = self.model.compute_gradcam(output.img)
             best_seg, best_mask = self.best_seg_by_gradcam_center(output, gradcam, imageid)
