@@ -192,6 +192,8 @@ class FEM:
             mask_area = np.count_nonzero(m)
             if mask_area < 0.01 * m.size:
                 continue
+            if mask_area > 0.8 * m.size:
+                continue
             # Maybe not necessary because dist not likely to select large bg
             all_ones = np.where(m == 1)  # tuple of 2d indices
             h1, h2, w1, w2 = all_ones[0].min(), all_ones[0].max(), all_ones[1].min(), all_ones[1].max()
