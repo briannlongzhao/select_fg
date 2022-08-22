@@ -234,7 +234,7 @@ class FEM:
 
     def M_step(self, images: Images, k: float = 0.5, mode: str = "mean", metric: str = "euclidean",
                # only in mode=gmm
-               n_cluster: Optional[int] = None, use_mahalanobis: bool = False) -> Tuple[Images, np.ndarray]:
+               n_cluster: Optional[int] = None) -> Tuple[Images, np.ndarray]:
         """
         step 2: Calculate / Update mean of patch embeddings using k% closest to mean
         d: feature dimension (2048 in xception)
@@ -274,7 +274,7 @@ class FEM:
                 1.2. if gmm_full: each cluster has one covar, compute distance for each cluster
             2. else, use @metric
             """
-            if use_mahalanobis:
+            if metric == "mahalanobis":
                 if mode == "gmm_tie":
                     # NOTE: share covar
                     inv_covar = np.linalg.pinv(gmm.covariances_)
@@ -391,7 +391,6 @@ class FEM:
                 k=self.args.M_k,
                 metric=self.args.M_metric,
                 n_cluster=self.args.M_n_cluster,
-                use_mahalanobis=self.args.M_mahalanobis
             )
             images = self.E_step(orig_images, mean_emb)
             self.save(images, iter, output_dir=self.args.save_root)
