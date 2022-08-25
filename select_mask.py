@@ -19,9 +19,10 @@ def parse_arguments():
     parser.add_argument('--num_iter', type=int, default=2, help="number of iterations should F-EM run")
     parser.add_argument('--target_class', type=str, help="desired target class, must be in label2id (see metadata directory)")
     parser.add_argument('--dataset', type=str, default="voc", choices=["coco", "voc"], help="which dataest F-EM is run on")
-    parser.add_argument('--debug', action="store_true", default=False, help="if set, only run F-EM on 10 percent of input")
     parser.add_argument('--bsz', type=int, default=16, help="batch size used in computing feature by feature extractor")
+    parser.add_argument('--load_step1', action="store_true", default=False, help="if set, don't compute step 1 but load from @save_root")
 
+    parser.add_argument('--debug', action="store_true", default=False, help="if set, only run F-EM on 10 percent of input")
     # M step
     parser.add_argument('--M_mode', type=str, default="mean", choices=["mean", "gmm_tied", "gmm_full"], help="in M step, which algorithm should be run to determine top k percent")
     parser.add_argument('--M_metric', type=str, default="euclidean", help="in M step, which distance metric is used in selecting top k percent")
@@ -32,6 +33,7 @@ def parse_arguments():
 
     # additional op
     args.save_root = Path(args.save_root)
+    args.save_root = args.save_root / args.dataset / f"{args.M_mode}[{args.M_metric},{args.M_k}]"
     args.mask_root = Path(args.mask_root)
     args.img_root = Path(args.img_root)
 

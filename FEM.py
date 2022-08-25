@@ -1,8 +1,10 @@
 import heapq
 import json
+import logging
 import os
 from collections import OrderedDict
 from dataclasses import dataclass
+import datetime
 from pathlib import Path
 from typing import Dict, Optional, Tuple, Iterator, List
 
@@ -16,11 +18,17 @@ from tqdm.auto import tqdm
 
 from model import Model, FeatureExtractor
 
+logging.basicConfig(
+    level=logging.DEBUG,
+    format="%(asctime)s %(name)s [%(levelname)8.8s] %(message)s",
+    handlers=[logging.StreamHandler()]
+)
+logger = logging.getLogger(__name__)
 
 @dataclass
 class Output:
     """
-    H, W should be same (hard code as 299 in voc)
+    H, W should be same (hard code as 299 in voc and 375 in coco)
     """
     # RGB (H, W, 3)
     img: np.ndarray
@@ -148,6 +156,16 @@ class FEM:
             images[imageid].best_mask = best_mask
         return images
 
+    def classifier_score(self, patch):
+        """
+        :param patch: RGB image that contains the object
+        :return: classifier's confidence score for @patch being @self.target_class_id
+            higher := more likely to be the target class
+        """
+        preds, _ = self.model(patch)
+        score = preds[0].cpu().numpy()[self.target_class_id].item()
+        return score
+
     @staticmethod
     def extract_scaleup_RGB(img, mask) -> Optional[np.ndarray]:
         """
@@ -194,6 +212,7 @@ class FEM:
         """
         dists = []
         for m in output:
+            # m: binary mask (H, W)
             mask_area = np.count_nonzero(m)
             if mask_area < 0.01 * m.size:
                 continue
@@ -213,7 +232,7 @@ class FEM:
             ]) / mask_area
             dists.append([dist, m])
         if len(dists) == 0:
-            print("No proper segment in", imagename)
+            logger.warning("No proper segment in", imagename)
             return None, None
 
         """
@@ -225,10 +244,9 @@ class FEM:
         best_m = None
         for _ in range(min(3, len(dists))):
             _, m = heapq.heappop(dists)
-            expanded_m = np.expand_dims(m, -1)  # (H, W, 1)
-            patch = expanded_m * output.img + (1 - expanded_m) * float(117)
-            preds, _ = self.model(patch)
-            score = preds[0].cpu().numpy()[self.target_class_id].item()
+            patch = self.extract_scaleup_RGB(output.img, m)
+            assert patch is not None, "patch shouldn't be malformed"
+            score = self.classifier_score(patch)
             if score > max_score:
                 max_score = score
                 best_m = m
@@ -252,6 +270,7 @@ class FEM:
         """
         embs = self.feat_extractor.compute_embedding(images.all_best_segs())  # (N, d)
         if mode == "mean":
+            assert metric != "mahalanobis"
             mean_emb = embs.mean(0, keepdims=True)  # (1, d)
             dist = distance.cdist(embs, mean_emb, metric=metric).squeeze()  # (N, )
         else:  # gmm
@@ -346,21 +365,25 @@ class FEM:
         """
         save intermediate results in @
         output directory =>
-            <output_dir>
-                <target_class>
-                    xx.png
-                    yy.png
-                <target_class>_mask
-                    xx.png
-                    yy.png
+            <args.save_dir>
+                <dataset>
+                    <step-1>
+                        step 1 results, ...
+                        same structure as below
+                    <M mode>[<M metric>,<M k>]
+                        <target_class>
+                            xx.png
+                            yy.png
+                        <target_class>_mask
+                            xx.png
+                            yy.png
         """
         if iter == -1:
-            subdir = "step-1"
+            dir = output_dir.parent / "step-1"
         else:
-            subdir = f"iter-{iter}"
+            dir = output_dir / f"iter-{iter}"
 
-        dir = output_dir / subdir
-        print("saving in", dir)
+        logger.info(f"saving in {dir}")
         mask_dir = dir / f"{self.target_class}_mask"
         seg_dir = dir / self.target_class
         os.makedirs(mask_dir, exist_ok=True)
@@ -373,6 +396,21 @@ class FEM:
                 mask = Image.fromarray(mask.astype(np.uint8) * 255)
                 mask.save(mask_dir / img.replace("jpg", "png"))
 
+    def load_step1(self, images: Images, load_dir: Path):
+        assert load_dir.exists(), f"with --load_step1, {load_dir} must exist!"
+        logger.info(f"loading from {load_dir}")
+        for imageid, output in images.items():
+            output: Output
+            imageid = imageid.replace("jpg", "png")
+            seg_img, mask_img = load_dir / self.target_class / imageid, load_dir / f"{self.target_class}_mask" / imageid
+            if seg_img.exists() and mask_img.exists():
+                output.best_seg = np.array(Image.open(seg_img)).astype("uint8")
+                output.best_mask = np.array(Image.open(mask_img)).astype("uint8") / 255
+            else:
+                logger.warning(f"{imageid} doesn't exist in {load_dir}, can be an error or because {imageid} is not valid")
+
+        logger.info("loading done!")
+
     def run(self):
         """
         run F-EM algorithm
@@ -384,12 +422,15 @@ class FEM:
         if self.args.debug:
             import random
             keep_keys = random.sample(images.keys(), int(len(images) * 0.1))
-            print(f"only keeping random 10% of {len(images)} input, i.e. {len(keep_keys)}")
+            logger.info(f"only keeping random 10% of {len(images)} input, i.e. {len(keep_keys)}")
             keep_keys = random.sample(images.keys(), int(len(images) * 0.1))
             images = images.filter_by(keep_keys)
 
-        images = self.select_seg_by_gradcam(images)
-        self.save(images, iter=-1, output_dir=self.args.save_root)
+        if self.args.load_step1:
+            self.load_step1(images, self.args.save_root.parent / "step-1")
+        else:
+            images = self.select_seg_by_gradcam(images)
+            self.save(images, iter=-1, output_dir=self.args.save_root)
         orig_images = images.copy()
         for iter in tqdm(range(self.args.num_iter), desc="EM iter"):
             _, mean_emb = self.M_step(
