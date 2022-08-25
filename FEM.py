@@ -158,7 +158,7 @@ class FEM:
 
     def classifier_score(self, patch):
         """
-        :param patch: RGB image that contains the object
+        :param patch: RGB image that contains the object (after self.extract_scaleup_RGB!)
         :return: classifier's confidence score for @patch being @self.target_class_id
             higher := more likely to be the target class
         """
