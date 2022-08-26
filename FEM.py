@@ -4,7 +4,6 @@ import logging
 import os
 from collections import OrderedDict
 from dataclasses import dataclass
-import datetime
 from pathlib import Path
 from typing import Dict, Optional, Tuple, Iterator, List
 
@@ -163,7 +162,7 @@ class FEM:
             higher := more likely to be the target class
         """
         preds, _ = self.model(patch)
-        score = preds[0].cpu().numpy()[self.target_class_id].item()
+        score = preds[0].detach().cpu().numpy()[self.target_class_id].item()
         return score
 
     @staticmethod
@@ -178,14 +177,31 @@ class FEM:
         mask_expanded = np.expand_dims(mask, -1)  # (H, W, 1)
         patch = mask_expanded * img + (1 - mask_expanded) * float(117)
         all_ones = np.where(mask == 1)  # tuple of 2d indices
-        h1, h2, w1, w2 = all_ones[0].min(), all_ones[0].max(), all_ones[1].min(), all_ones[1].max()
         try:
+            h1, h2, w1, w2 = all_ones[0].min(), all_ones[0].max(), all_ones[1].min(), all_ones[1].max()
             extracted_image = patch[h1:h2, w1:w2].astype(np.uint8)
             extracted_image = Image.fromarray(extracted_image)
         except:
             return
         extracted_image = extracted_image.resize((H, W), Image.BILINEAR)
         return np.array(extracted_image)
+
+    def erode_mask_and_patch(self, image, mask):
+        mask = cv2.erode(mask.astype(np.uint8), np.ones((3, 3)), cv2.BORDER_REFLECT)
+        patch = self.extract_scaleup_RGB(image, mask)
+        return patch, mask
+
+    def is_feasible_mask(self, m):
+        # m: binary mask (H, W)
+        mask_area = np.count_nonzero(m)
+        if mask_area < 0.01 * m.size:
+            return False
+        # Maybe not necessary because dist not likely to select large bg
+        all_ones = np.where(m == 1)  # tuple of 2d indices
+        h1, h2, w1, w2 = all_ones[0].min(), all_ones[0].max(), all_ones[1].min(), all_ones[1].max()
+        if len(m) - 1 - h2 + h1 < 10 or len(m[0]) - 1 - w2 + w1 < 10:
+            return False
+        return True
 
     @torch.no_grad()
     def best_seg_by_gradcam_center(self, output: Output, gradcam, imagename):
@@ -212,16 +228,8 @@ class FEM:
         """
         dists = []
         for m in output:
-            # m: binary mask (H, W)
-            mask_area = np.count_nonzero(m)
-            if mask_area < 0.01 * m.size:
-                continue
-            if mask_area > 0.8 * m.size:
-                continue
-            # Maybe not necessary because dist not likely to select large bg
-            all_ones = np.where(m == 1)  # tuple of 2d indices
-            h1, h2, w1, w2 = all_ones[0].min(), all_ones[0].max(), all_ones[1].min(), all_ones[1].max()
-            if len(m)-1-h2+h1 < 10 or len(m[0])-1-w2+w1 < 10:
+
+            if not self.is_feasible_mask(m):
                 continue
 
             # avg of all pixel Euclidean distances to center of GradCAM
@@ -229,10 +237,10 @@ class FEM:
                 distance.euclidean([x, y], [cx, cy])
                 for (x, y), val in np.ndenumerate(m)
                 if val == 1
-            ]) / mask_area
+            ]) / np.count_nonzero(m)
             dists.append([dist, m])
         if len(dists) == 0:
-            logger.warning("No proper segment in", imagename)
+            logger.warning(f"No proper segment in {imagename}")
             return None, None
 
         """
@@ -253,11 +261,9 @@ class FEM:
         """
         erosion best binary mask
         """
-        best_m = cv2.erode(best_m.astype(np.uint8), np.ones((3, 3)), cv2.BORDER_REFLECT)
-        best_image = self.extract_scaleup_RGB(output.img, best_m)
-        return best_image, best_m
+        return self.erode_mask_and_patch(output.img, best_m.copy())
 
-    def M_step(self, images: Images, k: float = 0.5, mode: str = "mean", metric: str = "euclidean",
+    def M_step(self, images: Images, k: float = 0.5, mode: str = "mean", metric: str = "euclidean", cls_thresh=0.5,
                # only in mode=gmm
                n_cluster: Optional[int] = None) -> Tuple[Images, np.ndarray]:
         """
@@ -268,7 +274,12 @@ class FEM:
             if mode = mean: mean_emb (1, d)
             if mode is any gmm: mean_emb (n_cluster, d)
         """
-        embs = self.feat_extractor.compute_embedding(images.all_best_segs())  # (N, d)
+        filtered_ids = [
+            id for id, output in images.items()
+            if output.best_seg is not None
+            and self.classifier_score(output.best_seg) > cls_thresh
+        ]
+        embs = self.feat_extractor.compute_embedding(images.filter_by(filtered_ids).all_best_segs())  # (N, d)
         if mode == "mean":
             assert metric != "mahalanobis"
             mean_emb = embs.mean(0, keepdims=True)  # (1, d)
@@ -343,15 +354,19 @@ class FEM:
         def extract_image_gen(output):
             nonlocal possible_ent_segs
             for m in output:
-                extracted_image = self.extract_scaleup_RGB(output.img, m)
-                if extracted_image is not None:
-                    possible_ent_segs.append((m, extracted_image))
-                    yield extracted_image
+                if self.is_feasible_mask(m):
+                    extracted_image, _ = self.erode_mask_and_patch(output.img, m.copy())
+                    if extracted_image is not None:
+                        possible_ent_segs.append((m, extracted_image))
+                        yield extracted_image
 
         for output in tqdm(orig_images.values(), desc="E step"):
             possible_ent_segs = []
-            emb = self.feat_extractor.compute_embedding(extract_image_gen(output))
-            assert emb.shape[0] == len(possible_ent_segs)
+            try:
+                emb = self.feat_extractor.compute_embedding(extract_image_gen(output))
+                assert emb.shape[0] == len(possible_ent_segs)
+            except:
+                continue
             # (N, n_cluster)
             dist = distance.cdist(emb, mean_emb, metric="cosine")
             # (N, )
@@ -426,7 +441,7 @@ class FEM:
             keep_keys = random.sample(images.keys(), int(len(images) * 0.1))
             images = images.filter_by(keep_keys)
 
-        if self.args.load_step1:
+        if self.args.load_step1 and os.path.exists(self.args.save_root.parent / "step-1" / self.target_class):
             self.load_step1(images, self.args.save_root.parent / "step-1")
         else:
             images = self.select_seg_by_gradcam(images)
