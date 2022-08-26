@@ -15,9 +15,9 @@ option = "-W ignore::FutureWarning "
 
 img_dir = "/lab/tmpig8d/u/brian-data/VOCdevkit/VOC2012/JPEGImages_split_multi/"
 mask_dir = "/lab/tmpig8d/u/brian-data/VOCdevkit/VOC2012/VOCmask_entseg"
-save_dir = "/lab/tmpig8b/u/brian-data/VOCdevkit/VOC2012/test_gmm_tied"
+save_dir = "/lab/tmpig8b/u/brian-data/VOCdevkit/VOC2012"
 
-M_mode = "gmm_tied"
+M_mode = "mean"
 M_metric = "euclidean"
 num_iter = 2
 
