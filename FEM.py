@@ -18,7 +18,7 @@ from tqdm.auto import tqdm
 from model import Model, FeatureExtractor
 
 logging.basicConfig(
-    level=logging.DEBUG,
+    level=logging.INFO,
     format="%(asctime)s %(name)s [%(levelname)8.8s] %(message)s",
     handlers=[logging.StreamHandler()]
 )
@@ -118,7 +118,6 @@ class FEM:
         images: Dict[imagename (eg 2007_000464.jpg) => Output]
             where Output = (image, seg mask, best seg (init None))
         """
-        # images = OrderedDict()
         images = Images()
         for imgname in os.listdir(img_root / f"{self.target_class_id}_{target_class}"):
             imgname: str
@@ -276,7 +275,7 @@ class FEM:
         """
         filtered_ids = [
             id for id, output in images.items()
-            if output.best_seg is not None
+            if output.is_valid()
             and self.classifier_score(output.best_seg) > cls_thresh
         ]
         embs = self.feat_extractor.compute_embedding(images.filter_by(filtered_ids).all_best_segs())  # (N, d)
@@ -304,6 +303,7 @@ class FEM:
                 bic = gmm.bic(embs)
                 if bic < best_bic:
                     best_bic, best_gmm = bic, gmm
+            logger.info(f"best n_component={best_gmm.n_components}")
             """
             compute distance
             1. use mahalanobis distance
