@@ -112,6 +112,7 @@ class FEM:
         self.model.register_gradcam(layer_name=self.model.find_target_layer(), img_size=self.img_size)
         self.feat_extractor = FeatureExtractor(feature_extractor, batch_size)
         self.feat_extractor = self.feat_extractor.to(device).eval()
+        self.feat_extractor = self.model
 
         """
         prepare images
@@ -251,7 +252,9 @@ class FEM:
         best_m = None
         for _ in range(min(3, len(dists))):
             _, m = heapq.heappop(dists)
-            patch = self.extract_scaleup_RGB(output.img, m)
+            # expanded_m = np.expand_dims(m, -1)  # (H, W, 1)  # No resize
+            # patch = expanded_m * output.img + (1 - expanded_m) * float(117)  # No resize
+            patch = self.extract_scaleup_RGB(output.img, m)  # Resize
             assert patch is not None, "patch shouldn't be malformed"
             score = self.classifier_score(patch)
             if score > max_score:
@@ -278,7 +281,11 @@ class FEM:
             if output.is_valid()
             and self.classifier_score(output.best_seg) > cls_thresh
         ]
-        embs = self.feat_extractor.compute_embedding(images.filter_by(filtered_ids).all_best_segs())  # (N, d)
+        logger.info(f"{len(filtered_ids)}/{len(images)} images to compute mean after filtering")
+        if len(filtered_ids):
+            embs = self.feat_extractor.compute_embedding(images.filter_by(filtered_ids).all_best_segs())  # (N, d)
+        else:
+            embs = self.feat_extractor.compute_embedding(images.all_best_segs())  # (N, d)
         if mode == "mean":
             assert metric != "mahalanobis"
             mean_emb = embs.mean(0, keepdims=True)  # (1, d)

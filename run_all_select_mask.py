@@ -15,15 +15,16 @@ option = "-W ignore::FutureWarning "
 
 img_dir = "/lab/tmpig8d/u/brian-data/VOCdevkit/VOC2012/JPEGImages_split_multi/"
 mask_dir = "/lab/tmpig8d/u/brian-data/VOCdevkit/VOC2012/VOCmask_entseg"
-save_dir = "/lab/tmpig8b/u/brian-data/VOCdevkit/VOC2012"
+save_dir = "/lab/tmpig8b/u/brian-data/VOCdevkit/resnet/"
 
 M_mode = "mean"
 M_metric = "euclidean"
+M_n_cluster = 3
 num_iter = 2
 
 def run(run_list):
     for target_class in run_list:
-        # if target_class in skip_list:
+        # if target_class != "pottedplant":
         #     continue
         os.system(
             "python " + option + script +
@@ -34,6 +35,7 @@ def run(run_list):
             " --num_iter " + str(num_iter) +
             " --M_mode " + M_mode +
             " --M_metric " + M_metric +
+            " --M_n_cluster " + str(M_n_cluster) +
             " --target_class " + '"' + target_class + '"' +
             " --load_step1"
         )
