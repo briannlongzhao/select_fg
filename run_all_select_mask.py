@@ -15,12 +15,12 @@ option = "-W ignore::FutureWarning "
 
 img_dir = "/lab/tmpig8d/u/brian-data/VOCdevkit/VOC2012/JPEGImages_split_multi/"
 mask_dir = "/lab/tmpig8d/u/brian-data/VOCdevkit/VOC2012/VOCmask_entseg"
-save_dir = "/lab/tmpig8b/u/brian-data/VOCdevkit/resnet/"
+save_dir = "/lab/tmpig8b/u/brian-data/VOCdevkit/xception/"
 
-M_mode = "mean"
-M_metric = "euclidean"
-M_n_cluster = 3
+M_mode = "gmm_full"
+M_metric = "mahalanobis"
 num_iter = 2
+#M_n_cluster = 3
 
 def run(run_list):
     for target_class in run_list:
@@ -33,11 +33,13 @@ def run(run_list):
             " --save_root " + save_dir +
             " --dataset " + dataset +
             " --num_iter " + str(num_iter) +
+            " --bsz " + str(1) +
             " --M_mode " + M_mode +
             " --M_metric " + M_metric +
-            " --M_n_cluster " + str(M_n_cluster) +
+            #" --M_n_cluster " + str(M_n_cluster) +
             " --target_class " + '"' + target_class + '"' +
-            " --load_step1"
+            " --load_step1" +
+            " --filter_result"
         )
 
 if len(sys.argv) == 2:  # Split run on multiple machines

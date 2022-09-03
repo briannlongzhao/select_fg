@@ -21,6 +21,7 @@ def parse_arguments():
     parser.add_argument('--dataset', type=str, default="voc", choices=["coco", "voc"], help="which dataest F-EM is run on")
     parser.add_argument('--bsz', type=int, default=16, help="batch size used in computing feature by feature extractor")
     parser.add_argument('--load_step1', action="store_true", default=False, help="if set, don't compute step 1 but load from @save_root")
+    parser.add_argument('--filter_result', action="store_true", default=False, help="if set, filter result saved using cls score")
 
     parser.add_argument('--debug', action="store_true", default=False, help="if set, only run F-EM on 10 percent of input")
     # M step

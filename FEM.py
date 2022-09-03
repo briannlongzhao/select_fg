@@ -114,6 +114,7 @@ class FEM:
         self.feat_extractor = self.feat_extractor.to(device).eval()
         self.feat_extractor = self.model
 
+
         """
         prepare images
         images: Dict[imagename (eg 2007_000464.jpg) => Output]
@@ -304,12 +305,15 @@ class FEM:
                 # GMM param:
                 #   means_ (n_cluster, d)
                 #   covariances_ if full: (n_cluster, d, d); if tie: (d, d)
-                gmm = mixture.GaussianMixture(n_components=n_component, random_state=42,
-                                              covariance_type=covariance_type, reg_covar=1e-5)
+                try:
+                    gmm = mixture.GaussianMixture(n_components=n_component, random_state=42, covariance_type=covariance_type, reg_covar=1e-4)
+                except:
+                    continue
                 gmm = gmm.fit(embs)
                 bic = gmm.bic(embs)
                 if bic < best_bic:
                     best_bic, best_gmm = bic, gmm
+            assert best_gmm is not None, "no fit gmm"
             logger.info(f"best n_component={best_gmm.n_components}")
             """
             compute distance
@@ -413,6 +417,8 @@ class FEM:
         for img, output in images.items():
             if output.is_valid():
                 seg, mask = output.best_seg, output.best_mask
+                if self.args.filter_result and self.classifier_score(seg) < 0.85:
+                    continue
                 seg = Image.fromarray(seg.astype(np.uint8))
                 seg.save(seg_dir / img.replace("jpg", "png"))
                 mask = Image.fromarray(mask.astype(np.uint8) * 255)
