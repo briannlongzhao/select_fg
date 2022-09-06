@@ -112,6 +112,7 @@ class Model(nn.Module):
         for seg in segs:
             # each seg (3, H, W)
             _ = self(seg[0].to(self.device).cpu().detach().numpy())
+        handle.remove()
         # (N, d)
         return np.squeeze(np.concatenate([emb.detach().cpu() for emb in embs], axis=0))
 
