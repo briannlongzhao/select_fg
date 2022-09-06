@@ -10,6 +10,7 @@ from typing import Dict, Optional, Tuple, Iterator, List
 import cv2
 import numpy as np
 import torch
+from torch import nn
 from PIL import Image
 from scipy.spatial import distance
 from sklearn import mixture
@@ -72,7 +73,7 @@ class FEM:
         # idx of corresponding target_class (eg index softmax pred by this)
         self.target_class_id: int
         self.label2id: Dict[str, int]
-        self.model: Model
+        self.classifier: Model
         self.img_size: int
 
     def prepare(
@@ -100,20 +101,18 @@ class FEM:
             with open("metadata/voc_label2id.json") as f:
                 self.label2id = json.load(f)
             self.target_class_id = int(self.label2id[target_class])
-            self.model = Model(model_name)  # Classifier
+            self.classifier = Model(model_name)  # Classifier
         elif dataset == "coco":
             # TODO: add coco classification model and configs
             self.img_size = 375
             raise NotImplementedError
-            # self.model = PytorchModelWrapper_public('Q2L_COCO', 375, '/lab/tmpig8e/u/brian-data/COCO2017/VOC_COCO2017/label2id.json', 'cuda:0')
+            # self.classifier = PytorchModelWrapper_public('Q2L_COCO', 375, '/lab/tmpig8e/u/brian-data/COCO2017/VOC_COCO2017/label2id.json', 'cuda:0')
         else:
             raise NotImplementedError
-        self.model = self.model.to(device).eval()
-        self.model.register_gradcam(layer_name=self.model.find_target_layer(), img_size=self.img_size)
+        self.classifier = self.classifier.to(device).eval()
+        self.classifier.register_gradcam(layer_name=self.classifier.find_target_layer(), img_size=self.img_size)
         self.feat_extractor = FeatureExtractor(feature_extractor, batch_size)
         self.feat_extractor = self.feat_extractor.to(device).eval()
-        self.feat_extractor = self.model
-
 
         """
         prepare images
@@ -147,8 +146,8 @@ class FEM:
         """
         for imageid, output in tqdm(images.copy().items(), desc="selecting seg by GradCAM"):
             output: Output
-            gradcam = self.model.compute_gradcam(output.img)
-            best_seg, best_mask = self.best_seg_by_gradcam_center(output, gradcam, imageid)
+            gradcam = self.classifier.compute_gradcam(output.img)
+            best_seg, best_mask, best_mask_idx = self.best_seg_by_gradcam_center(output, gradcam, imageid)
             if best_seg is None:
                 images.pop(imageid)
                 continue
@@ -162,7 +161,7 @@ class FEM:
         :return: classifier's confidence score for @patch being @self.target_class_id
             higher := more likely to be the target class
         """
-        preds, _ = self.model(patch)
+        preds, _ = self.classifier(patch)
         score = preds[0].detach().cpu().numpy()[self.target_class_id].item()
         return score
 
@@ -266,9 +265,18 @@ class FEM:
         """
         return self.erode_mask_and_patch(output.img, best_m.copy())
 
-    def M_step(self, images: Images, k: float = 0.5, mode: str = "mean", metric: str = "euclidean", cls_thresh=0.5,
-               # only in mode=gmm
-               n_cluster: Optional[int] = None) -> Tuple[Images, np.ndarray]:
+    def M_step(
+        self,
+        images: Images,
+        feat_extractor: nn.Module = None,
+        k: float = 0.5,
+        mode: str = "mean",
+        metric: str = "euclidean",
+        cls_thresh: float = 0.5,
+        filter=True,
+        # only in mode=gmm
+        n_cluster: Optional[int] = None
+    ) -> Tuple[Images, np.ndarray]:
         """
         step 2: Calculate / Update mean of patch embeddings using k% closest to mean
         d: feature dimension (2048 in xception)
@@ -277,16 +285,18 @@ class FEM:
             if mode = mean: mean_emb (1, d)
             if mode is any gmm: mean_emb (n_cluster, d)
         """
-        filtered_ids = [
-            id for id, output in images.items()
-            if output.is_valid()
-            and self.classifier_score(output.best_seg) > cls_thresh
-        ]
-        logger.info(f"{len(filtered_ids)}/{len(images)} images to compute mean after filtering")
-        if len(filtered_ids):
-            embs = self.feat_extractor.compute_embedding(images.filter_by(filtered_ids).all_best_segs())  # (N, d)
+        feat_extractor = self.feat_extractor if feat_extractor is None else feat_extractor
+        if filter:
+            filtered_ids = [
+                id for id, output in images.items()
+                if output.is_valid()
+                and self.classifier_score(output.best_seg) > cls_thresh
+            ]
+            logger.info(f"filter: {len(filtered_ids)}/{len(images)} images to compute mean")
+            assert len(filtered_ids) > 0
+            embs = feat_extractor.compute_embedding(images.filter_by(filtered_ids).all_best_segs())  # (N, d)
         else:
-            embs = self.feat_extractor.compute_embedding(images.all_best_segs())  # (N, d)
+            embs = feat_extractor.compute_embedding(images.all_best_segs())  # (N, d)
         if mode == "mean":
             assert metric != "mahalanobis"
             mean_emb = embs.mean(0, keepdims=True)  # (1, d)
@@ -351,16 +361,17 @@ class FEM:
             for i, (img, output) in enumerate(images.items())
             if i in top_k_indices
         })
+        logger.info(f"top {k}: {len(top_k_indices)}/{len(embs)} images to compute mean")
         if mode == "mean":
-            embs = self.feat_extractor.compute_embedding(images.all_best_segs())
+            embs = feat_extractor.compute_embedding(images.all_best_segs())
             mean_emb = embs.mean(0, keepdims=True)
         else: # gmm
             mean_emb = best_gmm.means_
         return images, mean_emb
 
-    def E_step(self, orig_images: Images, mean_emb):
+    def E_step(self, orig_images: Images, mean_emb, feat_extractor: nn.Module = None):
         """
-        step 3: For each segment compute distance /similarity to the updated means and select the best
+        step 3: For each segment compute distance/similarity to the updated means and select the best
         """
         def extract_image_gen(output):
             nonlocal possible_ent_segs
@@ -370,11 +381,11 @@ class FEM:
                     if extracted_image is not None:
                         possible_ent_segs.append((m, extracted_image))
                         yield extracted_image
-
+        feat_extractor = self.feat_extractor if feat_extractor is None else feat_extractor
         for output in tqdm(orig_images.values(), desc="E step"):
             possible_ent_segs = []
             try:
-                emb = self.feat_extractor.compute_embedding(extract_image_gen(output))
+                emb = feat_extractor.compute_embedding(extract_image_gen(output))
                 assert emb.shape[0] == len(possible_ent_segs)
             except:
                 continue
@@ -417,7 +428,7 @@ class FEM:
         for img, output in images.items():
             if output.is_valid():
                 seg, mask = output.best_seg, output.best_mask
-                if self.args.filter_result and self.classifier_score(seg) < 0.85:
+                if self.args.filter_result and self.classifier_score(seg) < 0.3:
                     continue
                 seg = Image.fromarray(seg.astype(np.uint8))
                 seg.save(seg_dir / img.replace("jpg", "png"))
@@ -439,6 +450,24 @@ class FEM:
 
         logger.info("loading done!")
 
+    def post_process(self, images1: Images, images2: Images):
+        """
+        Select output with higher score from 2 sets of proposals
+        """
+        images = Images()
+        assert len(images1) == len(images2), "proposals should have save number of images"
+        for (image1, output1), (image2, output2) in zip(images1.items(), images2.items()):
+            assert image1 == image2
+            try:
+                if self.classifier_score(output1.best_seg) > self.classifier_score(output2.best_seg):
+                    best_output = output1
+                else:
+                    best_output = output2
+                images[image1] = best_output
+            except:
+                continue
+        return images
+
     def run(self):
         """
         run F-EM algorithm
@@ -459,14 +488,27 @@ class FEM:
         else:
             images = self.select_seg_by_gradcam(images)
             self.save(images, iter=-1, output_dir=self.args.save_root)
-        orig_images = images.copy()
         for iter in tqdm(range(self.args.num_iter), desc="EM iter"):
-            _, mean_emb = self.M_step(
+            k = self.args.M_k[min(iter, len(self.args.M_k)-1)] if type(self.args.M_k) is list else self.args.M_k
+            _, mean_emb_fe = self.M_step(
                 images,
+                feat_extractor=self.feat_extractor,
                 mode=self.args.M_mode,
-                k=self.args.M_k,
+                k=k,
                 metric=self.args.M_metric,
                 n_cluster=self.args.M_n_cluster,
+                filter=(iter == 0)
             )
-            images = self.E_step(orig_images, mean_emb)
+            _, mean_emb_cls = self.M_step(
+                images,
+                feat_extractor=self.classifier,
+                mode=self.args.M_mode,
+                k=k,
+                metric=self.args.M_metric,
+                n_cluster=self.args.M_n_cluster,
+                filter=(iter == 0)
+            )
+            images_fe = self.E_step(images.copy(), mean_emb_fe, feat_extractor=self.feat_extractor)
+            images_cls = self.E_step(images.copy(), mean_emb_cls, feat_extractor=self.classifier)
+            images = self.post_process(images_fe, images_cls)
             self.save(images, iter, output_dir=self.args.save_root)

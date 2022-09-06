@@ -27,7 +27,7 @@ def parse_arguments():
     # M step
     parser.add_argument('--M_mode', type=str, default="mean", choices=["mean", "gmm_tied", "gmm_full"], help="in M step, which algorithm should be run to determine top k percent")
     parser.add_argument('--M_metric', type=str, default="euclidean", help="in M step, which distance metric is used in selecting top k percent")
-    parser.add_argument('--M_k', type=float, default=0.5, help="in M step, retain k percent of total images")
+    parser.add_argument('--M_k', type=float, default=0.5, nargs='+', help="in M step, retain k percent of total images")
     parser.add_argument('--M_n_cluster', type=int, default=None, help="only used if M_mode=gmm, if not set, try to find best n_cluster")
 
     args = parser.parse_args()
