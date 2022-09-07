@@ -43,7 +43,7 @@ def run(run_list):
             " --target_class " + '"' + target_class + '"' +
             " --load_step1" +
             " --filter_result" +
-            " --filter_thresh" + str(filter_thresh)
+            " --filter_thresh " + str(filter_thresh)
         )
 
 if len(sys.argv) == 2:  # Split run on multiple machines
