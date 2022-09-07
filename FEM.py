@@ -32,11 +32,11 @@ class Output:
     """
     # RGB (H, W, 3)
     img: np.ndarray
-    # ent seg mask, pixel value 1-#ent & 255 (dummy)
+    # ent seg mask (original size), pixel value 1-#ent & 255 (dummy)
     mask: np.ndarray
     # RGB of best ent (scaled up) (H, W, 3)
     best_seg: Optional[np.ndarray] = None
-    # binary mask of best ent (H, W)
+    # binary mask of best ent (original size)
     best_mask: Optional[np.ndarray] = None
 
     def is_valid(self) -> bool:
@@ -133,7 +133,8 @@ class FEM:
             # pixel value 1-#ent & 255
             entseg_mask = np.load(mask_path)
             # (self.image_size, self.image_size)
-            entseg_mask = Image.fromarray(entseg_mask).resize((self.img_size, self.img_size), Image.NEAREST)
+            #entseg_mask = Image.fromarray(entseg_mask).resize((self.img_size, self.img_size), Image.NEAREST)
+            entseg_mask = Image.fromarray(entseg_mask)
             entseg_mask = np.array(entseg_mask)
             images[imgname] = Output(img=img, mask=entseg_mask)
         return images
@@ -147,7 +148,7 @@ class FEM:
         for imageid, output in tqdm(images.copy().items(), desc="selecting seg by GradCAM"):
             output: Output
             gradcam = self.classifier.compute_gradcam(output.img)
-            best_seg, best_mask, best_mask_idx = self.best_seg_by_gradcam_center(output, gradcam, imageid)
+            best_seg, best_mask= self.best_seg_by_gradcam_center(output, gradcam, imageid)
             if best_seg is None:
                 images.pop(imageid)
                 continue
@@ -165,15 +166,14 @@ class FEM:
         score = preds[0].detach().cpu().numpy()[self.target_class_id].item()
         return score
 
-    @staticmethod
-    def extract_scaleup_RGB(img, mask) -> Optional[np.ndarray]:
+    def extract_scaleup_RGB(self, img, mask) -> Optional[np.ndarray]:
         """
         :param img: RGB (H, W, 3) unnormalized
-        :param mask: binary (H, W)
+        :param mask: binary (original size)
         :return: RGB extracted image, scale up i.e. enlarge, (H, W, 3) unnormalized
             but if extract fail (eg area too small), return None
         """
-        H, W = mask.shape
+        mask = self.resize_mask(mask)
         mask_expanded = np.expand_dims(mask, -1)  # (H, W, 1)
         patch = mask_expanded * img + (1 - mask_expanded) * float(117)
         all_ones = np.where(mask == 1)  # tuple of 2d indices
@@ -183,7 +183,7 @@ class FEM:
             extracted_image = Image.fromarray(extracted_image)
         except:
             return
-        extracted_image = extracted_image.resize((H, W), Image.BILINEAR)
+        extracted_image = extracted_image.resize((self.img_size, self.img_size), Image.BILINEAR)
         return np.array(extracted_image)
 
     def erode_mask_and_patch(self, image, mask):
@@ -191,7 +191,13 @@ class FEM:
         patch = self.extract_scaleup_RGB(image, mask)
         return patch, mask
 
-    def is_feasible_mask(self, m):
+    def resize_mask(self, mask):
+        mask_resized = Image.fromarray(mask.astype(np.uint8)).resize((self.img_size, self.img_size), Image.NEAREST)
+        mask_resized = np.array(mask_resized)
+        return mask_resized
+
+    @staticmethod
+    def is_feasible_mask(m):
         # m: binary mask (H, W)
         mask_area = np.count_nonzero(m)
         if mask_area < 0.01 * m.size:
@@ -209,7 +215,7 @@ class FEM:
         for all possible seg in @segmask, select best one
         :param output: contains
             img: (H, W, 3) original image
-            mask: (H, W) mask, pixel value 1-#seg & 255 (dummy)
+            mask: (original size) mask, pixel value 1-#seg & 255 (dummy)
         :param gradcam: (H, W) GradCAM heatmap, binary
         :return: (masked image, mask)
             where mask is one of seg in @segmask, (H, W) binary, 1 = object
@@ -228,16 +234,16 @@ class FEM:
         """
         dists = []
         for m in output:
-
-            if not self.is_feasible_mask(m):
+            m_resized = self.resize_mask(m)
+            if not self.is_feasible_mask(m_resized):
                 continue
 
             # avg of all pixel Euclidean distances to center of GradCAM
             dist = sum([
                 distance.euclidean([x, y], [cx, cy])
-                for (x, y), val in np.ndenumerate(m)
+                for (x, y), val in np.ndenumerate(m_resized)
                 if val == 1
-            ]) / np.count_nonzero(m)
+            ]) / np.count_nonzero(m_resized)
             dists.append([dist, m])
         if len(dists) == 0:
             logger.warning(f"No proper segment in {imagename}")
