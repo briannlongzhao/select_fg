@@ -404,7 +404,7 @@ class FEM:
 
         return orig_images
 
-    def save(self, images: Images, iter: int, output_dir: Path):
+    def save(self, images: Images, iter: int, output_dir: Path, filter_thresh=0.3):
         """
         save intermediate results in @
         output directory =>
@@ -434,7 +434,7 @@ class FEM:
         for img, output in images.items():
             if output.is_valid():
                 seg, mask = output.best_seg, output.best_mask
-                if self.args.filter_result and self.classifier_score(seg) < 0.3:
+                if self.args.filter_result and self.classifier_score(seg) < filter_thresh:
                     continue
                 seg = Image.fromarray(seg.astype(np.uint8))
                 seg.save(seg_dir / img.replace("jpg", "png"))
@@ -517,4 +517,4 @@ class FEM:
             images_fe = self.E_step(images.copy(), mean_emb_fe, feat_extractor=self.feat_extractor)
             images_cls = self.E_step(images.copy(), mean_emb_cls, feat_extractor=self.classifier)
             images = self.post_process(images_fe, images_cls)
-            self.save(images, iter, output_dir=self.args.save_root)
+            self.save(images, iter, output_dir=self.args.save_root, filter_thresh=self.args.filter_thresh)
