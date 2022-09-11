@@ -1,5 +1,4 @@
-from typing import Iterator
-
+from typing import Iterator, OrderedDict
 import numpy as np
 import timm
 import torch
@@ -19,8 +18,24 @@ class Model(nn.Module):
             self.model.avgpool = torch.nn.AdaptiveAvgPool2d(1)
             num_ftrs = self.model.fc.in_features
             self.model.fc = torch.nn.Linear(num_ftrs, 20)
-            self.model.load_state_dict(torch.load('/lab/briannlz/select_fg/pretrained_models/voc_multilabel/resnet50/model-2.pth'))
-        else:  #TODO: add coco classifier
+            self.model.load_state_dict(torch.load("/lab/briannlz/select_fg/pretrained_models/voc_multilabel/resnet50/model-2.pth"))
+        elif model_name == "q2l":
+            from coco_cls.query2label import build_q2l
+            def clean_state_dict(state_dict):
+                new_state_dict = OrderedDict()
+                for k, v in state_dict.items():
+                    if k[:7] == 'module.':
+                        k = k[7:]  # remove `module.`
+                    new_state_dict[k] = v
+                return new_state_dict
+            self.model = build_q2l()
+            checkpoint = torch.load("/lab/briannlz/select_fg/pretrained_models/coco_multilabel/checkpoint.pkl")
+            state_dict = clean_state_dict(checkpoint['state_dict'])
+            self.model.load_state_dict(state_dict, strict=True)
+            del checkpoint
+            del state_dict
+            torch.cuda.empty_cache()
+        else:
             raise NotImplementedError
         self.find_layer_idx()
         # self.transform = transforms.Compose([
@@ -86,8 +101,8 @@ class Model(nn.Module):
             self.target_layer_idx[name] = idx
             self.layers[idx] = module
 
-    def compute_embedding(self, images, BOTTLENECK_LAYER="avgpool"):
-
+    def compute_embedding(self, images):
+        emb_layer = "avgpool" if "avgpool" in self.target_layer_idx.keys() else "fc"
         def preprocess_img(images):
             x = np.ascontiguousarray(images)
             x = x[np.newaxis, ...]
@@ -98,11 +113,10 @@ class Model(nn.Module):
         def hook(module, input, output):
             embs.append(output.clone().detach())
 
-        if BOTTLENECK_LAYER == "fc":
+        if emb_layer == "fc":
             handle = self.model.fc.register_forward_hook(hook)
         else:
-            handle = self.layers[self.target_layer_idx[BOTTLENECK_LAYER]].register_forward_hook(hook)
-
+            handle = self.layers[self.target_layer_idx[emb_layer]].register_forward_hook(hook)
         segs = [
             preprocess_img(image)
             for image in images

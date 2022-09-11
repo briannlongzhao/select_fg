@@ -2,7 +2,7 @@ import json
 import os
 import sys
 
-num_machine = 5
+num_machine = 10
 
 dataset = "voc"
 
@@ -13,16 +13,20 @@ class_list = [name for name in json.load(open(f"metadata/{dataset}_label2id.json
 script = "select_mask.py"
 option = "-W ignore::FutureWarning "
 
-img_dir = "/lab/tmpig8d/u/brian-data/VOCdevkit/VOC2012/JPEGImages_split_multi/"
-mask_dir = "/lab/tmpig8d/u/brian-data/VOCdevkit/VOC2012/VOCmask_entseg"
-save_dir = "/lab/tmpig8b/u/brian-data/VOCdevkit/1comp0.3/"
+if dataset == "voc":
+    img_dir = "/lab/tmpig8d/u/brian-data/VOCdevkit/VOC2012/JPEGImages_split_multi/"
+    mask_dir = "/lab/tmpig8d/u/brian-data/VOCdevkit/VOC2012/VOCmask_entseg/"
+elif dataset == "coco":
+    img_dir  = "/lab/tmpig8e/u/brian-data/COCO2017/train2017_split/"
+    mask_dir = "/lab/tmpig8e/u/brian-data/COCO2017/train2017_split_entseg/"
+save_dir = "/lab/tmpig8b/u/brian-data/VOCdevkit/1comp0.1/"
 
 M_mode = "gmm_full"
 M_metric = "mahalanobis"
 num_iter = 3
 M_k = "0.3 0.5 0.7"
 M_n_cluster = 1
-filter_thresh = 0.3
+filter_thresh = 0.1
 
 def run(run_list):
     for target_class in run_list:
@@ -35,13 +39,13 @@ def run(run_list):
             " --save_root " + save_dir +
             " --dataset " + dataset +
             " --num_iter " + str(num_iter) +
-            " --bsz " + str(1) +
+            " --bsz " + str(8) +
             " --M_mode " + M_mode +
             " --M_metric " + M_metric +
             " --M_n_cluster " + str(M_n_cluster) +
             " --M_k " + M_k +
             " --target_class " + '"' + target_class + '"' +
-            " --load_step1" +
+            #" --load_step1"
             " --filter_result" +
             " --filter_thresh " + str(filter_thresh)
         )

@@ -101,15 +101,16 @@ class FEM:
             with open("metadata/voc_label2id.json") as f:
                 self.label2id = json.load(f)
             self.target_class_id = int(self.label2id[target_class])
-            self.classifier = Model(model_name)  # Classifier
         elif dataset == "coco":
             # TODO: add coco classification model and configs
+            model_name = "q2l"
             self.img_size = 375
-            raise NotImplementedError
-            # self.classifier = PytorchModelWrapper_public('Q2L_COCO', 375, '/lab/tmpig8e/u/brian-data/COCO2017/VOC_COCO2017/label2id.json', 'cuda:0')
+            with open("metadata/coco_label2id.json") as f:
+                self.label2id = self.coco_label2id(json.load(f))
+            self.target_class_id = int(self.label2id[target_class])
         else:
             raise NotImplementedError
-        self.classifier = self.classifier.to(device).eval()
+        self.classifier = Model(model_name).to(device).eval()  # Classifier
         self.classifier.register_gradcam(layer_name=self.classifier.find_target_layer(), img_size=self.img_size)
         self.feat_extractor = FeatureExtractor(feature_extractor, batch_size)
         self.feat_extractor = self.feat_extractor.to(device).eval()
@@ -120,14 +121,20 @@ class FEM:
             where Output = (image, seg mask, best seg (init None))
         """
         images = Images()
-        for imgname in os.listdir(img_root / f"{self.target_class_id}_{target_class}"):
+        if self.args.dataset == "voc":
+            cat_dir = f"{self.target_class_id}_{target_class}"
+        elif self.args.dataset == "coco":
+            cat_dir = target_class
+        else:
+            raise NotImplementedError
+        for imgname in os.listdir(img_root / cat_dir):
             imgname: str
             # imgname = imgname.split(".")[0] # no extension
-            img_path = img_root / f"{self.target_class_id}_{target_class}" / imgname
+            img_path = img_root / cat_dir / imgname
             # (image_size, image_size, 3)
             img = Image.open(img_path).resize((self.img_size, self.img_size), Image.BILINEAR)
             img = np.array(img)
-            mask_path = mask_root / f"{self.target_class_id}_{target_class}" / f"{imgname}.npy"
+            mask_path = mask_root / cat_dir / f"{imgname}.npy"
             assert mask_path.exists(), f"mask file {mask_path} must exist!!"
             # (H, W)
             # pixel value 1-#ent & 255
@@ -147,7 +154,10 @@ class FEM:
         """
         for imageid, output in tqdm(images.copy().items(), desc="selecting seg by GradCAM"):
             output: Output
-            gradcam = self.classifier.compute_gradcam(output.img)
+            try:
+                gradcam = self.classifier.compute_gradcam(output.img)
+            except:
+                continue
             best_seg, best_mask= self.best_seg_by_gradcam_center(output, gradcam, imageid)
             if best_seg is None:
                 images.pop(imageid)
@@ -197,6 +207,15 @@ class FEM:
         return mask_resized
 
     @staticmethod
+    def coco_label2id(lab2id91):
+        lab2id80 = {}
+        i = 0
+        for k,v in lab2id91.items():
+            lab2id80[k] = i
+            i += 1
+        return lab2id80
+
+    @staticmethod
     def is_feasible_mask(m):
         # m: binary mask (H, W)
         mask_area = np.count_nonzero(m)
@@ -205,7 +224,7 @@ class FEM:
         # Maybe not necessary because dist not likely to select large bg
         all_ones = np.where(m == 1)  # tuple of 2d indices
         h1, h2, w1, w2 = all_ones[0].min(), all_ones[0].max(), all_ones[1].min(), all_ones[1].max()
-        if len(m) - 1 - h2 + h1 < 10 or len(m[0]) - 1 - w2 + w1 < 10:
+        if len(m) - 1 - h2 + h1 < 5 or len(m[0]) - 1 - w2 + w1 < 5:
             return False
         return True
 
@@ -278,7 +297,7 @@ class FEM:
         k: float = 0.5,
         mode: str = "mean",
         metric: str = "euclidean",
-        cls_thresh: float = 0.5,
+        cls_thresh: float = 0.1,
         filter=True,
         # only in mode=gmm
         n_cluster: Optional[int] = None
@@ -404,7 +423,7 @@ class FEM:
 
         return orig_images
 
-    def save(self, images: Images, iter: int, output_dir: Path, filter_thresh=0.3):
+    def save(self, images: Images, iter: int, output_dir: Path, filter_thresh=0.1):
         """
         save intermediate results in @
         output directory =>
@@ -493,7 +512,7 @@ class FEM:
             self.load_step1(images, self.args.save_root.parent / "step-1")
         else:
             images = self.select_seg_by_gradcam(images)
-            self.save(images, iter=-1, output_dir=self.args.save_root)
+            self.save(images, iter=-1, output_dir=self.args.save_root, filter_thresh=0.0)
         for iter in tqdm(range(self.args.num_iter), desc="EM iter"):
             k = self.args.M_k[min(iter, len(self.args.M_k)-1)] if type(self.args.M_k) is list else self.args.M_k
             _, mean_emb_fe = self.M_step(
