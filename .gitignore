@@ -1,5 +1,6 @@
 pretrained_models/
 .idea/
+.vscode/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -130,3 +131,8 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+img_root
+VOCmask_entseg
+.vscode
+mask_test_gmm
+select_fg

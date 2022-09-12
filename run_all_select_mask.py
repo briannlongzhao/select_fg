@@ -1,43 +1,60 @@
-import os
 import json
+import os
 import sys
 
-class_list = ['aeroplane',   'bicycle',   'bird',   'boat',   'bottle',   'bus',   'car',   'cat',   'chair',   'cow',   'diningtable',   'dog',   'horse',   'motorbike',   'person',    'pottedplant',   'sheep',   'sofa',   'train',   'tvmonitor'] # VOC classes
-#class_list = ['airplane',    'bicycle',   'bird',   'boat',   'bottle',   'bus',   'car',   'cat',   'chair',   'cow',   'dining table',  'dog',   'horse',   'motorbike',   'person',    'potted plant',  'sheep',   'couch',  'train',    'tv']  # COCO classes
-class_list_coco = [name for name in json.load(open("/lab/tmpig8e/u/brian-data/COCO2017/VOC_COCO2017/label2id.json")).keys()]
-pick_list =  {'aeroplane':50,'bicycle':50,'bird':50,'boat':50,'bottle':50,'bus':50,'car':50,'cat':50,'chair':50,'cow':50,'diningtable':50,'dog':50,'horse':50,'motorbike':50,'person':100,'pottedplant':50,'sheep':50,'sofa':50,'train':50,'tvmonitor':50}
-step_list =  {'aeroplane':50,'bicycle':50,'bird':50,'boat':50,'bottle':50,'bus':50,'car':50,'cat':50,'chair':50,'cow':50,'diningtable':50,'dog':50,'horse':50,'motorbike':50,'person':100,'pottedplant':50,'sheep':50,'sofa':50,'train':50,'tvmonitor':50}
-#threshold =  {'aeroplane':0.85, 'bicycle':0.85,'bird':0.85,'boat':0.90,'bottle':0.85,'bus':0.85,'car':0.85,'cat':0.85,'chair':0.85,'cow':0.85,'diningtable':0.5,'dog':0.85,'horse':0.85,'motorbike':0.85,'person':0.85,'pottedplant':0.85,'sheep':0.85,'sofa':0.85,'train':0.85,'tvmonitor':0.85}
+num_machine = 10
 
-option = "-W ignore::FutureWarning "
-script = "select_mask.py"
-#save_dir = "/lab/tmpig8d/u/brian-data/VOCdevkit/VOC2012/COB_VOC_seg_split_mask/"
-save_dir = "/lab/tmpig8e/u/brian-data/COCO2017/train2017_split_mask"
-img_dir = "/lab/tmpig8e/u/brian-data/COCO2017/train2017_split/"
-#mask_dir = "/lab/tmpig8d/u/brian-data/VOCdevkit/VOC2012/COB_VOC_seg_split/"  # output of COB seg
-mask_dir = "/lab/tmpig8e/u/brian-data/COCO2017/train2017_split_entseg"  # output of entseg
-extraction_dir = img_dir
-method = "gmm"
 dataset = "voc"
 
-num_machine = 8
-if len(sys.argv) == 2:
-    part = int(sys.argv[1])
-    assert part != 0
-    assert part <= num_machine
-    class_list_coco = class_list_coco[int((part-1)*len(class_list_coco)/num_machine):int(part*len(class_list_coco)/num_machine)]
-    print(class_list_coco)
+class_list = [name for name in json.load(open(f"metadata/{dataset}_label2id.json")).keys()]
 
-for class_name in class_list_coco:
-    if class_name not in ["toaster","baseball bat","backpack","baseball glove","bowl","book","dining table","knife","mouse","skis","hair drier","handbag","snowboard","spoon","sports ball","truck","toothbrush"]:
-        continue
-    try:
-        pick = str(pick_list[class_name])
-    except:
-        pick = "50"
-    try:
-        pick_step = str(step_list[class_name])
-    except:
-        pick_step = "50"
-    #os.system("rm -r " + os.path.join(save_dir,class_name))
-    os.system("python "+option+script+" --img_root "+img_dir+" --mask_root "+mask_dir+" --extraction_root "+extraction_dir+" --save_root "+save_dir+" --num_iter 3 "+" --pick "+pick+" --pick_step "+pick_step+" --method "+method+" --dataset "+dataset+" --target_class \""+class_name+'\"')
+#skip_list = ["aeroplane", "bicycle", "bird", "boat", "bottle", "bus", "car"]
+
+script = "select_mask.py"
+option = "-W ignore::FutureWarning "
+
+if dataset == "voc":
+    img_dir = "/lab/tmpig8d/u/brian-data/VOCdevkit/VOC2012/JPEGImages_split_multi/"
+    mask_dir = "/lab/tmpig8d/u/brian-data/VOCdevkit/VOC2012/VOCmask_entseg/"
+elif dataset == "coco":
+    img_dir  = "/lab/tmpig8e/u/brian-data/COCO2017/train2017_split/"
+    mask_dir = "/lab/tmpig8e/u/brian-data/COCO2017/train2017_split_entseg/"
+save_dir = "/lab/tmpig8b/u/brian-data/VOCdevkit/1comp0.1/"
+
+M_mode = "gmm_full"
+M_metric = "mahalanobis"
+num_iter = 3
+M_k = "0.3 0.5 0.7"
+M_n_cluster = 1
+filter_thresh = 0.1
+
+def run(run_list):
+    for target_class in run_list:
+        # if target_class != "pottedplant":
+        #     continue
+        os.system(
+            "python " + option + script +
+            " --img_root " + img_dir +
+            " --mask_root " + mask_dir +
+            " --save_root " + save_dir +
+            " --dataset " + dataset +
+            " --num_iter " + str(num_iter) +
+            " --bsz " + str(8) +
+            " --M_mode " + M_mode +
+            " --M_metric " + M_metric +
+            " --M_n_cluster " + str(M_n_cluster) +
+            " --M_k " + M_k +
+            " --target_class " + '"' + target_class + '"' +
+            #" --load_step1"
+            " --filter_result" +
+            " --filter_thresh " + str(filter_thresh)
+        )
+
+if len(sys.argv) == 2:  # Split run on multiple machines
+    part = int(sys.argv[1])
+    assert part < num_machine, "index (0 based) larger than number of machines"
+    class_list_part = class_list[int(part*len(class_list)/num_machine):int((part+1)*len(class_list)/num_machine)]
+    print(class_list_part)
+    run(class_list_part)
+else:  # run all classes
+    run(class_list)
