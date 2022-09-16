@@ -10,7 +10,7 @@ from gradcam import GradCAM
 
 
 class Model(nn.Module):
-    def __init__(self, model_name: str):
+    def __init__(self, model_name: str, batch_size=16):
         super().__init__()
         self.gradcam: GradCAM
         if model_name == "resnet":
@@ -38,6 +38,7 @@ class Model(nn.Module):
         else:
             raise NotImplementedError
         self.find_layer_idx()
+        self.batch_size = batch_size
         # self.transform = transforms.Compose([
         #     transforms.ToTensor(),
         #     #transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
@@ -65,10 +66,23 @@ class Model(nn.Module):
         :param img: RGB (H, W, 3) np.ndarray(int, unnormalized) or (N, H, W, 3)
         :return: pred and tensorized normalized img
         """
-        img = img.transpose(2, 0, 1).astype(float) / 255
-        if img.ndim == 3:
-            img = img[np.newaxis, ...]  # (1, 3, H, W)
-        img = torch.from_numpy(img).float().to(self.device)
+        # if img.ndim == 3:
+        #     img = img.transpose(2, 0, 1).astype(float) / 255
+        #     img = img[np.newaxis, ...]  # (1, 3, H, W)
+        # else:
+        #     assert img.ndim == 4
+        #     img = img.transpose(0, 3, 1, 2).astype(float) / 255
+        # img = torch.from_numpy(img).float().to(self.device)
+        # preds = self.model(img)  # (N, K)
+        # return preds.softmax(-1), img
+        if img.dim() == 4:
+            img = torch.permute(img, (0, 3, 1, 2)) / 255
+        else:
+            assert img.dim() == 3
+            img = torch.permute(img, (2, 0, 1)) / 255
+            img = img.unsqueeze(0)  # (1, 3, H, W)
+
+        img = img.to(self.device)
         preds = self.model(img)  # (N, K)
         return preds.softmax(-1), img
 
@@ -122,10 +136,10 @@ class Model(nn.Module):
             for image in images
         ]
         # (N, C=3, H, W)
-        #segs = torch.stack(segs, dim=0)
+        segs = torch.stack(segs, dim=0)
         for seg in segs:
             # each seg (3, H, W)
-            _ = self(seg[0].to(self.device).cpu().detach().numpy())
+            _ = self(seg)
         handle.remove()
         # (N, d)
         return np.squeeze(np.concatenate([emb.detach().cpu() for emb in embs], axis=0))
