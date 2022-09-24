@@ -446,10 +446,10 @@ class VisionTransformer(nn.Module):
 
     def _init_weights_trunc_normal(self, m):
         if isinstance(m, nn.Linear):
-            logging.info('=> init weight of Linear from trunc norm')
+            #logging.info('=> init weight of Linear from trunc norm')
             trunc_normal_(m.weight, std=0.02)
             if m.bias is not None:
-                logging.info('=> init bias of Linear to zeros')
+                #logging.info('=> init bias of Linear to zeros')
                 nn.init.constant_(m.bias, 0)
         elif isinstance(m, (nn.LayerNorm, nn.BatchNorm2d)):
             nn.init.constant_(m.bias, 0)
@@ -460,7 +460,7 @@ class VisionTransformer(nn.Module):
             logging.info('=> init weight of Linear from xavier uniform')
             nn.init.xavier_uniform_(m.weight)
             if m.bias is not None:
-                logging.info('=> init bias of Linear to zeros')
+                #logging.info('=> init bias of Linear to zeros')
                 nn.init.constant_(m.bias, 0)
         elif isinstance(m, (nn.LayerNorm, nn.BatchNorm2d)):
             nn.init.constant_(m.bias, 0)

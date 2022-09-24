@@ -105,6 +105,7 @@ class FEM:
         :param feature_extractor: name of feature extractor, should be available in timm
         :return images, containing all images & classes
         """
+        logger.info("preparing images")
         self.target_class = target_class
         if dataset == "voc":
             model_name = "resnet"
@@ -138,7 +139,7 @@ class FEM:
             cat_dir = target_class
         else:
             raise NotImplementedError
-        for imgname in os.listdir(img_root / cat_dir):
+        for imgname in tqdm(os.listdir(img_root / cat_dir), desc="prepare"):
             imgname: str
             # imgname = imgname.split(".")[0] # no extension
             img_path = img_root / cat_dir / imgname
@@ -168,7 +169,8 @@ class FEM:
             output: Output
             try:
                 gradcam = self.classifier.compute_gradcam(output.img)
-            except:
+            except Exception as e:
+                print(imageid, e)
                 continue
             best_seg, best_mask = self.best_seg_by_gradcam_center(output, gradcam, imageid)
             if best_seg is None:
@@ -187,6 +189,20 @@ class FEM:
         preds, _ = self.classifier(patch)
         score = preds[0].detach().cpu().numpy()[self.target_class_id].item()
         return score
+
+    def classifier_score_coco(self, saved_embs, image_id, m_id):
+        """
+        :param saved_embs: mask id of segment
+        :return: classifier's confidence score for @patch being @self.target_class_id
+            higher := more likely to be the target class
+        """
+        assert saved_embs is not None
+        emb = self.retrieve_embedding(saved_embs, [image_id], [[m_id]])
+        if emb is None:
+            return None
+        cls_score = torch.squeeze(torch.Tensor(emb)).softmax(-1)
+        assert len(cls_score) == 80
+        return cls_score[self.target_class_id]
 
     def extract_scaleup_RGB(self, img, mask) -> Optional[np.ndarray]:
         """
@@ -231,7 +247,7 @@ class FEM:
     def is_feasible_mask(m):
         # m: binary mask (H, W)
         mask_area = np.count_nonzero(m)
-        if mask_area < 0.01 * m.size:
+        if mask_area < 0.005 * m.size:
             return False
         # Maybe not necessary because dist not likely to select large bg
         all_ones = np.where(m == 1)  # tuple of 2d indices
@@ -302,15 +318,20 @@ class FEM:
         """
         return self.erode_mask_and_patch(output.img, best_m.copy())
 
-    def retrieve_embedding(self, saved_embs, image_ids, available_ids):
+    def retrieve_embedding(self, saved_embs, image_ids, available_ids, mode='M'):
         """
-        For all image_id retrieve saved embeddings of available_ids
+        For all image_id retrieve saved embeddings of available_ids (2d array)
         Return ndarray of size num_segs by feat_dim
         """
         assert len(image_ids) == len(available_ids)
         embs = []
         for img_id, seg_ids in zip(image_ids, available_ids):
             for m_id in seg_ids:
+                if saved_embs[img_id] is None:
+                    if mode == 'M':
+                        continue
+                    if mode == 'E':
+                        return None
                 embs.append(saved_embs[img_id][m_id])
         embs = np.array(embs)
         return embs
@@ -447,19 +468,19 @@ class FEM:
         feat_extractor = self.feat_extractor if feat_extractor is None else feat_extractor
         for image_id, output in tqdm(orig_images.items(), desc="E step"):
             possible_ent_segs = []
-            #try:
             if saved_embs is None:
                 emb = feat_extractor.compute_embedding(extract_image_gen(output))
             else:
                 _ = list(extract_image_gen(output))
-                emb = self.retrieve_embedding(saved_embs, [image_id], [[x[1] for x in possible_ent_segs]])
-            assert emb.shape[0] == len(possible_ent_segs)
-            if emb.shape[0] == 0:
+                emb = self.retrieve_embedding(saved_embs, [image_id], [[x[1] for x in possible_ent_segs]], mode='E')
+            if emb is None or emb.shape[0] == 0:
                 continue
-            #except Exception as e:
-            #    continue
             # (N, n_cluster)
-            dist = distance.cdist(emb, mean_emb, metric="cosine")
+            try:
+                dist = distance.cdist(emb, mean_emb, metric="cosine")
+            except Exception as e:
+                print(image_id, e)
+                continue
             # (N, )
             dist = dist.min(1)
             best_idx = dist.argmin()
@@ -467,7 +488,7 @@ class FEM:
 
         return orig_images
 
-    def save(self, images: Images, iter: int, output_dir: Path, filter_thresh=0.1):
+    def save(self, images: Images, iter: int, output_dir: Path, filter_thresh=-1):
         """
         save intermediate results in @
         output directory =>
@@ -508,7 +529,7 @@ class FEM:
     def load_step1(self, images: Images, load_dir: Path):
         assert load_dir.exists(), f"with --load_step1, {load_dir} must exist!"
         logger.info(f"loading from {load_dir}")
-        for imageid, output in images.items():
+        for imageid, output in tqdm(images.items(), desc="load_step1"):
             output: Output
             imageid = imageid.replace("jpg", "png")
             seg_img, mask_img = load_dir / self.target_class / imageid, load_dir / f"{self.target_class}_mask" / imageid
@@ -533,7 +554,7 @@ class FEM:
         """
         images = Images()
         assert len(images1) == len(images2), "proposals should have save number of images"
-        for (image1, output1), (image2, output2) in zip(images1.items(), images2.items()):
+        for (image1, output1), (image2, output2) in tqdm(zip(images1.items(), images2.items()), desc="post_process"):
             assert image1 == image2
             try:
                 if self.classifier_score(output1.best_seg) > self.classifier_score(output2.best_seg):
@@ -556,13 +577,14 @@ class FEM:
 
         if self.args.debug:
             import random
-            keep_keys = random.sample(images.keys(), int(len(images) * 0.1))
-            logger.info(f"only keeping random 10% of {len(images)} input, i.e. {len(keep_keys)}")
-            keep_keys = random.sample(images.keys(), int(len(images) * 0.1))
+            keep_keys = random.sample(images.keys(), int(len(images) * 0.01))
+            logger.info(f"only keeping random 1% of {len(images)} input, i.e. {len(keep_keys)}")
+            #keep_keys = random.sample(images.keys(), int(len(images) * 0.01))
             images = images.filter_by(keep_keys)
 
         # Load embeddings of segments
         if self.args.load_embs:
+            logger.info("loading saved embedding")
             embs_featex = self.load_embeddings(self.args.save_root.parent / "embs" / self.target_class / "xception.pkl")
             if self.args.dataset == "coco":
                 embs_cls = self.load_embeddings(self.args.save_root.parent / "embs" / self.target_class / "q2l.pkl")
@@ -577,12 +599,16 @@ class FEM:
         if self.args.ignore_person and embs_cls is not None:
             assert self.args.dataset == "coco", "able to get cls score from embedding only for coco"
             logger.info("removing person-like segments")
-            for image_id, output in images.items():
-                for m_id, m in output:
-                    cls_score = np.squeeze(self.retrieve_embedding(embs_cls, [image_id], [[m_id]]).softmax(-1))
-                    assert len(cls_score) == 80
-                    if cls_score[0] > 0.1:
-                        output.mask[output.mask == m] = 255
+            for image_id, output in tqdm(images.items(), desc="removing person segments"):
+                for m, m_id in output:
+                    emb = self.retrieve_embedding(embs_cls, [image_id], [[m_id]])
+                    if emb is None or not np.all(emb) or emb.size == 0:
+                        continue
+                    cls_score = torch.squeeze(torch.Tensor(emb)).softmax(-1)
+                    if torch.numel(cls_score) != 80:
+                        continue
+                    if cls_score[0] > 0.3:
+                        output.mask[output.mask == m_id] = 255
 
         # Load step1
         if self.args.load_step1 and os.path.exists(self.args.save_root.parent / "step-1" / self.target_class):

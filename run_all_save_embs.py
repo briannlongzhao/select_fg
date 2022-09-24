@@ -23,7 +23,7 @@ save_dir = "/lab/tmpig8b/u/brian-data/VOCdevkit/1comp0.1/"
 
 def run(run_list):
     for target_class in run_list:
-        # if target_class != "pottedplant":
+        # if target_class != "cat":
         #     continue
         os.system(
             "python " + option + script +
@@ -32,7 +32,8 @@ def run(run_list):
             " --save_root " + save_dir +
             " --target_class " + '"' + target_class + '"' +
             " --dataset " + dataset +
-            " --bsz " + str(16)
+            " --bsz " + str(4) +
+            " --model " + "cls"
         )
 
 if len(sys.argv) == 2:  # Split run on multiple machines

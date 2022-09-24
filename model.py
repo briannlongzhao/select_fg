@@ -1,6 +1,8 @@
+import os.path
 from typing import Iterator, OrderedDict
 import numpy as np
 import timm
+import sys
 import torch
 from PIL import Image
 from torch import nn
@@ -10,7 +12,7 @@ from gradcam import GradCAM
 
 
 class Model(nn.Module):
-    def __init__(self, model_name: str, batch_size=16):
+    def __init__(self, model_name: str, batch_size=8):
         super().__init__()
         self.gradcam: GradCAM
         if model_name == "resnet":
@@ -20,6 +22,8 @@ class Model(nn.Module):
             self.model.fc = torch.nn.Linear(num_ftrs, 20)
             self.model.load_state_dict(torch.load("/lab/briannlz/select_fg/pretrained_models/voc_multilabel/resnet50/model-2.pth"))
         elif model_name == "q2l":
+            if os.path.basename(sys.argv[0]) == "select_mask.py":
+                batch_size = 1
             from coco_cls.query2label import build_q2l
             def clean_state_dict(state_dict):
                 new_state_dict = OrderedDict()
@@ -63,18 +67,11 @@ class Model(nn.Module):
 
     def forward(self, img):
         """
-        :param img: RGB (H, W, 3) np.ndarray(int, unnormalized) or (N, H, W, 3)
+        :param img: RGB (H, W, 3) (int, unnormalized) or (N, H, W, 3)
         :return: pred and tensorized normalized img
         """
-        # if img.ndim == 3:
-        #     img = img.transpose(2, 0, 1).astype(float) / 255
-        #     img = img[np.newaxis, ...]  # (1, 3, H, W)
-        # else:
-        #     assert img.ndim == 4
-        #     img = img.transpose(0, 3, 1, 2).astype(float) / 255
-        # img = torch.from_numpy(img).float().to(self.device)
-        # preds = self.model(img)  # (N, K)
-        # return preds.softmax(-1), img
+        if not torch.is_tensor(img):
+            img = torch.Tensor(img)
         if img.dim() == 4:
             img = torch.permute(img, (0, 3, 1, 2)) / 255
         else:
@@ -83,7 +80,11 @@ class Model(nn.Module):
             img = img.unsqueeze(0)  # (1, 3, H, W)
 
         img = img.to(self.device)
-        preds = self.model(img)  # (N, K)
+        if os.path.basename(sys.argv[0]) == "save_embs.py":
+            with torch.no_grad():
+                preds = self.model(img)  # (N, K)
+        else:
+            preds = self.model(img)  # (N, K)
         return preds.softmax(-1), img
 
     def register_gradcam(self, layer_name, img_size):
@@ -137,9 +138,9 @@ class Model(nn.Module):
         ]
         # (N, C=3, H, W)
         segs = torch.stack(segs, dim=0)
-        for seg in segs:
+        for seg in segs.split(self.batch_size):
             # each seg (3, H, W)
-            _ = self(seg)
+            _ = self(seg.squeeze())
         handle.remove()
         # (N, d)
         return np.squeeze(np.concatenate([emb.detach().cpu() for emb in embs], axis=0))

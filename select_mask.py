@@ -40,8 +40,8 @@ def parse_arguments():
     args.mask_root = Path(args.mask_root)
     args.img_root = Path(args.img_root)
 
-    for path in args.save_root.glob(f"*/{args.target_class}*"):
-        shutil.rmtree(path)
+    # for path in args.save_root.glob(f"*/{args.target_class}*"):
+    #     shutil.rmtree(path)
 
     return args
 

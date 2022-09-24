@@ -97,7 +97,7 @@ if __name__ == '__main__':
     alg = FEM(args)
     alg.img_size = args.img_size
 
-    model = FeatureExtractor(args.model_name, args.bsz) if args.model == "featex" else Model(args.model_name)
+    model = FeatureExtractor(args.model_name, args.bsz) if args.model == "featex" else Model(args.model_name, args.bsz)
     model = model.to(device).eval()
 
     save_root = args.save_root / args.target_class
