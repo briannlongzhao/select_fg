@@ -144,8 +144,13 @@ class FEM:
             # imgname = imgname.split(".")[0] # no extension
             img_path = img_root / cat_dir / imgname
             # (image_size, image_size, 3)
-            img = Image.open(img_path).resize((self.img_size, self.img_size), Image.BILINEAR)
+            try:
+                img = Image.open(img_path).resize((self.img_size, self.img_size), Image.BILINEAR)
+            except:
+                continue
             img = np.array(img)
+            if np.max(img) == 0:
+                continue
             mask_path = mask_root / cat_dir / f"{imgname}.npy"
             assert mask_path.exists(), f"mask file {mask_path} must exist!!"
             # (H, W)
@@ -247,7 +252,7 @@ class FEM:
     def is_feasible_mask(m):
         # m: binary mask (H, W)
         mask_area = np.count_nonzero(m)
-        if mask_area < 0.005 * m.size:
+        if mask_area < 0.01 * m.size:
             return False
         # Maybe not necessary because dist not likely to select large bg
         all_ones = np.where(m == 1)  # tuple of 2d indices
@@ -488,7 +493,7 @@ class FEM:
 
         return orig_images
 
-    def save(self, images: Images, iter: int, output_dir: Path, filter_thresh=-1):
+    def save(self, images: Images, iter: int, output_dir: Path, filter_thresh=-1.0):
         """
         save intermediate results in @
         output directory =>
@@ -615,7 +620,7 @@ class FEM:
             self.load_step1(images, self.args.save_root.parent / "step-1")
         else:
             images = self.select_seg_by_gradcam(images)
-            self.save(images, iter=-1, output_dir=self.args.save_root, filter_thresh=0.0)
+            self.save(images, iter=-1, output_dir=self.args.save_root, filter_thresh=0.1)
 
         for iter in tqdm(range(self.args.num_iter), desc="EM iter"):
             k = self.args.M_k[min(iter, len(self.args.M_k)-1)] if type(self.args.M_k) is list else self.args.M_k
