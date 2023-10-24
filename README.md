@@ -14,6 +14,8 @@ pip install -r requirements.txt
 
 ## Usage
 
+Please download the pretrained VOC and COCO classifier weights [here](https://drive.google.com/file/d/1EkPTpidMGcVHMf6eKUqmP6fixnp-jHdp/view?usp=sharing) and place `pretrained_models` in the repo directory.
+
 The main entry point is `select_mask.py`. Run `python select_mask.py --help` for arguments.
 ```
 usage: select_mask.py [-h] --img_root IMG_ROOT --mask_root MASK_ROOT [--save_root SAVE_ROOT] [--num_iter NUM_ITER] [--target_class TARGET_CLASS] [--dataset {coco,voc}] [--debug] [--bsz BSZ] [--M_mode {mean,gmm_tied,gmm_full}]
