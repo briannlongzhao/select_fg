@@ -20,7 +20,7 @@ class Model(nn.Module):
             self.model.avgpool = torch.nn.AdaptiveAvgPool2d(1)
             num_ftrs = self.model.fc.in_features
             self.model.fc = torch.nn.Linear(num_ftrs, 20)
-            self.model.load_state_dict(torch.load("/lab/briannlz/select_fg/pretrained_models/voc_multilabel/resnet50/model-2.pth"))
+            self.model.load_state_dict(torch.load("pretrained_models/voc_multilabel/resnet50/model-2.pth"))
         elif model_name == "q2l":
             if os.path.basename(sys.argv[0]) == "select_mask.py":
                 batch_size = 1
@@ -33,7 +33,7 @@ class Model(nn.Module):
                     new_state_dict[k] = v
                 return new_state_dict
             self.model = build_q2l()
-            checkpoint = torch.load("/lab/briannlz/select_fg/pretrained_models/coco_multilabel/checkpoint.pkl")
+            checkpoint = torch.load("pretrained_models/coco_multilabel/checkpoint.pkl")
             state_dict = clean_state_dict(checkpoint['state_dict'])
             self.model.load_state_dict(state_dict, strict=True)
             del checkpoint
